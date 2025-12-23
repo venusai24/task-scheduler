@@ -32,6 +32,7 @@ func (s *server) SubmitIntent(ctx context.Context, req *pb.SubmitRequest) (*pb.S
 		IntentYaml: req.YamlContent,
 		State:      pb.TaskState_CREATED,
 		Logs:       []string{},
+		Mode:       pb.GovernanceMode_ADVISORY_ONLY, // Default to Safe Mode
 	}
 
 	log.Printf("Received Intent. Assigning ID: %s. Applying to Raft...", taskID)
@@ -87,13 +88,12 @@ func main() {
 	log.Printf("Raft storage started on %s", raftAddr)
 	time.Sleep(2 * time.Second) // Wait for Leader Election
 
-	// 3. LISTEN FOR EVENTS (The new part)
-	// Subscribe to worker completions
+	// 3. LISTEN FOR EVENTS (The Brain)
+	
+	// A. Completion Listener
 	_, err = js.Subscribe("tasks.events.completed", func(m *nats.Msg) {
 		taskID := string(m.Data)
 		log.Printf("EVENT: Received Completion for %s", taskID)
-
-		// Update Raft State
 		if err := st.TransitionState(taskID, pb.TaskState_COMPLETED); err != nil {
 			log.Printf("ERR: Failed to mark task complete: %v", err)
 		} else {
@@ -101,7 +101,51 @@ func main() {
 		}
 	})
 	if err != nil {
-		log.Fatalf("Failed to subscribe to events: %v", err)
+		log.Fatalf("Failed to subscribe to completed events: %v", err)
+	}
+
+	// B. Failure Listener (GOVERNANCE LOGIC)
+	_, err = js.Subscribe("tasks.events.failed", func(m *nats.Msg) {
+		taskID := string(m.Data)
+		log.Printf("EVENT: Received FAILURE for %s", taskID)
+
+		// 1. Get current state
+		task, err := st.Get(taskID)
+		if err != nil {
+			log.Printf("ERR: Unknown task %s failed", taskID)
+			return
+		}
+
+		// 2. Check Governance Mode
+		const MaxRetries = 3
+
+		if task.Mode == pb.GovernanceMode_ADVISORY_ONLY {
+			if task.RetryCount < MaxRetries {
+				log.Printf("GOVERNANCE: Advisory Mode. Retrying task %s (%d/%d)", taskID, task.RetryCount+1, MaxRetries)
+				
+				// Update DB (Increment Retry Count)
+				_, err := st.IncrementRetry(taskID)
+				if err != nil {
+					log.Printf("ERR: Failed to update retry count: %v", err)
+					return
+				}
+
+				// Re-Queue to NATS
+				_, err = js.Publish("tasks.scheduled", []byte(taskID))
+				if err != nil {
+					log.Printf("ERR: Failed to re-queue task: %v", err)
+				}
+
+			} else {
+				log.Printf("GOVERNANCE: Max retries exhausted for %s. Marking FAILED.", taskID)
+				st.TransitionState(taskID, pb.TaskState_FAILED)
+			}
+		} else {
+			log.Println("GOVERNANCE: Autonomous mode not implemented yet.")
+		}
+	})
+	if err != nil {
+		log.Fatalf("Failed to subscribe to failure events: %v", err)
 	}
 
 	// 4. gRPC Server

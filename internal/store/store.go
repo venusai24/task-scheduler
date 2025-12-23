@@ -148,3 +148,36 @@ func (s *Store) Get(id string) (*pb.Task, error) {
 	}
 	return t, nil
 }
+
+func (s *Store) IncrementRetry(id string) (int32, error) {
+	if s.raft.State() != raft.Leader {
+		return 0, fmt.Errorf("not leader")
+	}
+
+	s.mu.RLock()
+	task, exists := s.tasks[id]
+	s.mu.RUnlock()
+
+	if !exists {
+		return 0, fmt.Errorf("task not found")
+	}
+
+	// Clone and Update
+	updatedTask := *task
+	updatedTask.RetryCount++
+	updatedTask.State = pb.TaskState_PENDING // Reset to pending so it can be picked up
+	
+	// Append log to history for debugging
+	updatedTask.Logs = append(updatedTask.Logs, fmt.Sprintf("Retry #%d triggered at %s", updatedTask.RetryCount, time.Now().Format(time.RFC3339)))
+
+	b, err := json.Marshal(&updatedTask)
+	if err != nil {
+		return 0, err
+	}
+	
+	if err := s.raft.Apply(b, 10*time.Second).Error(); err != nil {
+		return 0, err
+	}
+
+	return updatedTask.RetryCount, nil
+}

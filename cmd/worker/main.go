@@ -37,7 +37,7 @@ func main() {
 		taskID := string(m.Data)
 		log.Printf("Received Task ID: %s", taskID)
 
-		// 4. EXECUTE & REPORT
+		// 4. EXECUTE (Simulating FAILURE)
 		executeTask(taskID, js)
 
 		m.Ack()
@@ -62,17 +62,15 @@ func main() {
 func executeTask(id string, js nats.JetStreamContext) {
 	log.Printf(">>> STARTING Execution for %s", id)
 
-	// Simulate work
-	time.Sleep(3 * time.Second)
+	// Simulate work duration
+	time.Sleep(1 * time.Second) 
 
-	log.Printf("<<< FINISHED Execution for %s", id)
+	// FORCE FAILURE (For Testing Governance)
+	log.Printf("!!! TASK FAILED (Simulated) for %s", id)
 
-	// REPORT BACK TO SCHEDULER
-	// We publish to "tasks.events.completed"
-	_, err := js.Publish("tasks.events.completed", []byte(id))
+	// Report FAILURE
+	_, err := js.Publish("tasks.events.failed", []byte(id))
 	if err != nil {
-		log.Printf("Failed to report success: %v", err)
-	} else {
-		log.Printf("Reported success for %s", id)
+		log.Printf("Failed to report failure: %v", err)
 	}
 }
