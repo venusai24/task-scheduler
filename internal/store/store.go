@@ -1,0 +1,150 @@
+package store
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"sync"
+	"time"
+
+	"github.com/hashicorp/raft"
+	pb "github.com/venusai24/task-scheduler/proto"
+)
+
+// Store holds the actual data and the Raft instance
+type Store struct {
+	mu    sync.RWMutex
+	tasks map[string]*pb.Task // The "State" we are protecting
+
+	raft *raft.Raft // The Consensus mechanism
+}
+
+// NewStore initializes the memory map
+func NewStore() *Store {
+	return &Store{
+		tasks: make(map[string]*pb.Task),
+	}
+}
+
+// -- RAFT FSM IMPLEMENTATION --
+
+// Apply is called by Raft when a log is committed.
+func (s *Store) Apply(l *raft.Log) interface{} {
+	var task pb.Task
+
+	// We assume the log data is just the JSON of the Task
+	if err := json.Unmarshal(l.Data, &task); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Apply the change to the local state
+	s.tasks[task.Id] = &task
+	return nil
+}
+
+// Snapshot is used to compact logs
+func (s *Store) Snapshot() (raft.FSMSnapshot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Clone the map
+	clone := make(map[string]*pb.Task)
+	for k, v := range s.tasks {
+		clone[k] = v
+	}
+	return &fsmSnapshot{store: clone}, nil
+}
+
+// Restore loads the state from a snapshot
+func (s *Store) Restore(rc io.ReadCloser) error {
+	o := make(map[string]*pb.Task)
+	if err := json.NewDecoder(rc).Decode(&o); err != nil {
+		return err
+	}
+	s.tasks = o
+	return nil
+}
+
+// -- SNAPSHOT HELPER --
+
+type fsmSnapshot struct {
+	store map[string]*pb.Task
+}
+
+func (f *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
+	err := func() error {
+		b, err := json.Marshal(f.store)
+		if err != nil {
+			return err
+		}
+		if _, err := sink.Write(b); err != nil {
+			return err
+		}
+		return sink.Close()
+	}()
+	if err != nil {
+		sink.Cancel()
+	}
+	return err
+}
+
+func (f *fsmSnapshot) Release() {}
+
+// -- PUBLIC API --
+
+// Set adds a task to the distributed store
+func (s *Store) Set(t *pb.Task) error {
+	if s.raft.State() != raft.Leader {
+		return fmt.Errorf("not leader")
+	}
+
+	b, err := json.Marshal(t)
+	if err != nil {
+		return err
+	}
+
+	f := s.raft.Apply(b, 10*time.Second)
+	return f.Error()
+}
+
+// TransitionState updates just the state of a task
+func (s *Store) TransitionState(id string, newState pb.TaskState) error {
+	if s.raft.State() != raft.Leader {
+		return fmt.Errorf("not leader")
+	}
+
+	// 1. Get current task to ensure it exists
+	s.mu.RLock()
+	task, exists := s.tasks[id]
+	s.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("task %s not found", id)
+	}
+
+	// 2. Clone and Update (Immutability pattern)
+	updatedTask := *task
+	updatedTask.State = newState
+
+	// 3. Commit to Raft
+	b, err := json.Marshal(&updatedTask)
+	if err != nil {
+		return err
+	}
+	return s.raft.Apply(b, 10*time.Second).Error()
+}
+
+// Get reads a task (local read)
+func (s *Store) Get(id string) (*pb.Task, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	t, ok := s.tasks[id]
+	if !ok {
+		return nil, fmt.Errorf("task not found")
+	}
+	return t, nil
+}
