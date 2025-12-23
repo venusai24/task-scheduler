@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  # The Nervous System
+  nats:
+    image: nats:latest
+    ports:
+      - "4222:4222" # Client port
+      - "8222:8222" # Dashboard
+    command: "-js" # Enable JetStream (Persisted queues)
+
+  # Optional: A UI to see NATS messages
+  nats-box:
+    image: natsio/nats-box
+    depends_on: [nats]
+    command: sleep infinity

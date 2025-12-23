@@ -1,0 +1,42 @@
+syntax = "proto3";
+package sched;
+option go_package = "github.com/venusai24/task-scheduler/proto";
+
+// The Governance Mode (Safety Switch)
+enum GovernanceMode {
+  ADVISORY_ONLY = 0; // AI suggests, Human/Code decides
+  AUTONOMOUS = 1;    // AI decides
+  HUMAN_GATE = 2;    // Stop and wait for human click
+}
+
+// The State Machine
+enum TaskState {
+  CREATED = 0;
+  PENDING = 1;
+  RUNNING = 2;
+  COMPLETED = 3;
+  FAILED = 4;
+  ANALYZING = 5; // AI is looking at it
+}
+
+// The core Task definition
+message Task {
+  string id = 1;
+  string intent_yaml = 2; // Store original YAML
+  TaskState state = 3;
+  GovernanceMode mode = 4;
+  int32 retry_count = 5;
+  repeated string logs = 6;
+  string ai_insight = 7; // The AI's JSON analysis
+}
+
+// RPC Service Definition
+service SchedService {
+  rpc SubmitIntent (SubmitRequest) returns (SubmitResponse);
+  rpc GetTask (TaskRequest) returns (TaskResponse);
+}
+
+message SubmitRequest { string yaml_content = 1; }
+message SubmitResponse { string task_id = 1; }
+message TaskRequest { string task_id = 1; }
+message TaskResponse { Task task = 1; }
