@@ -1,0 +1,3 @@
+reasoning/venv/
+data/node-1/raft-log.bolt
+data/node-1/raft-stable.bolt

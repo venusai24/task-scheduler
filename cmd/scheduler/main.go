@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -16,23 +17,30 @@ import (
 	pb "github.com/venusai24/task-scheduler/proto"
 )
 
-// server implements the gRPC SchedService
+// Verdict matches the JSON sent by the Python Agent
+type Verdict struct {
+	TaskID   string `json:"task_id"`
+	Decision string `json:"decision"` // "RETRY" or "STOP"
+	Reason   string `json:"reason"`
+}
+
 type server struct {
 	pb.UnimplementedSchedServiceServer
 	store *store.Store
 	js    nats.JetStreamContext
 }
 
-// SubmitIntent handles new task submissions
 func (s *server) SubmitIntent(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitResponse, error) {
 	taskID := nuid.Next()
 
+	// NOTE: We are setting MODE to AUTONOMOUS for this test!
+	// In a real CLI, this comes from the YAML content.
 	task := &pb.Task{
 		Id:         taskID,
 		IntentYaml: req.YamlContent,
 		State:      pb.TaskState_CREATED,
 		Logs:       []string{},
-		Mode:       pb.GovernanceMode_ADVISORY_ONLY, // Default to Safe Mode
+		Mode:       pb.GovernanceMode_AUTONOMOUS, // <--- CHANGED FOR DEMO
 	}
 
 	log.Printf("Received Intent. Assigning ID: %s. Applying to Raft...", taskID)
@@ -51,7 +59,6 @@ func (s *server) SubmitIntent(ctx context.Context, req *pb.SubmitRequest) (*pb.S
 	return &pb.SubmitResponse{TaskId: taskID}, nil
 }
 
-// GetTask retrieves the current state
 func (s *server) GetTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
 	task, err := s.store.Get(req.TaskId)
 	if err != nil {
@@ -86,74 +93,82 @@ func main() {
 		log.Fatalf("Failed to open Raft store: %v", err)
 	}
 	log.Printf("Raft storage started on %s", raftAddr)
-	time.Sleep(2 * time.Second) // Wait for Leader Election
+	time.Sleep(2 * time.Second) 
 
-	// 3. LISTEN FOR EVENTS (The Brain)
-	
-	// A. Completion Listener
+	// 3. LISTENERS
+
+	// A. Completed
 	_, err = js.Subscribe("tasks.events.completed", func(m *nats.Msg) {
 		taskID := string(m.Data)
 		log.Printf("EVENT: Received Completion for %s", taskID)
-		if err := st.TransitionState(taskID, pb.TaskState_COMPLETED); err != nil {
-			log.Printf("ERR: Failed to mark task complete: %v", err)
+		st.TransitionState(taskID, pb.TaskState_COMPLETED)
+	})
+
+	// B. Verdict Listener (THE NEW PART)
+	// Consumes analysis results from the Python Agent
+	_, err = js.Subscribe("tasks.governance.verdict", func(m *nats.Msg) {
+		var v Verdict
+		if err := json.Unmarshal(m.Data, &v); err != nil {
+			log.Printf("ERR: Bad verdict JSON: %v", err)
+			return
+		}
+		
+		log.Printf("🤖 AI VERDICT for %s: %s (%s)", v.TaskID, v.Decision, v.Reason)
+
+		if v.Decision == "RETRY" {
+			// Autonomous Retry
+			_, err := st.IncrementRetry(v.TaskID)
+			if err != nil {
+				log.Printf("ERR: Failed to increment retry: %v", err)
+				return
+			}
+			// Re-queue
+			js.Publish("tasks.scheduled", []byte(v.TaskID))
+			log.Printf("   -> Task re-queued automatically.")
 		} else {
-			log.Printf("SUCCESS: Task %s marked as COMPLETED in Raft.", taskID)
+			// Autonomous Stop
+			st.TransitionState(v.TaskID, pb.TaskState_FAILED)
+			log.Printf("   -> Task HALTED to save costs.")
 		}
 	})
-	if err != nil {
-		log.Fatalf("Failed to subscribe to completed events: %v", err)
-	}
 
-	// B. Failure Listener (GOVERNANCE LOGIC)
+	// C. Failure Listener
 	_, err = js.Subscribe("tasks.events.failed", func(m *nats.Msg) {
 		taskID := string(m.Data)
 		log.Printf("EVENT: Received FAILURE for %s", taskID)
 
-		// 1. Get current state
 		task, err := st.Get(taskID)
 		if err != nil {
-			log.Printf("ERR: Unknown task %s failed", taskID)
 			return
 		}
 
-		// 2. Check Governance Mode
-		const MaxRetries = 3
-
+		// LOGIC SWITCH
 		if task.Mode == pb.GovernanceMode_ADVISORY_ONLY {
-			if task.RetryCount < MaxRetries {
-				log.Printf("GOVERNANCE: Advisory Mode. Retrying task %s (%d/%d)", taskID, task.RetryCount+1, MaxRetries)
-				
-				// Update DB (Increment Retry Count)
-				_, err := st.IncrementRetry(taskID)
-				if err != nil {
-					log.Printf("ERR: Failed to update retry count: %v", err)
-					return
-				}
-
-				// Re-Queue to NATS
-				_, err = js.Publish("tasks.scheduled", []byte(taskID))
-				if err != nil {
-					log.Printf("ERR: Failed to re-queue task: %v", err)
-				}
-
+			// ... Old Logic (Blind Retry) ...
+			if task.RetryCount < 3 {
+				log.Printf("GOVERNANCE: Advisory Mode. Retrying...")
+				st.IncrementRetry(taskID)
+				js.Publish("tasks.scheduled", []byte(taskID))
 			} else {
-				log.Printf("GOVERNANCE: Max retries exhausted for %s. Marking FAILED.", taskID)
+				log.Printf("GOVERNANCE: Max retries exhausted.")
 				st.TransitionState(taskID, pb.TaskState_FAILED)
 			}
 		} else {
-			log.Println("GOVERNANCE: Autonomous mode not implemented yet.")
+			// NEW: AUTONOMOUS MODE
+			// 1. Mark as Analyzing
+			log.Printf("GOVERNANCE: Autonomous Mode. Requesting AI Analysis...")
+			st.TransitionState(taskID, pb.TaskState_ANALYZING)
+			
+			// 2. The Python agent is already listening to 'tasks.events.failed',
+			// so we don't need to send a separate request. It will pick this up automatically.
 		}
 	})
-	if err != nil {
-		log.Fatalf("Failed to subscribe to failure events: %v", err)
-	}
 
-	// 4. gRPC Server
+	// 4. Server
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalf("Failed to listen on port 50051: %v", err)
 	}
-
 	grpcServer := grpc.NewServer()
 	pb.RegisterSchedServiceServer(grpcServer, &server{store: st, js: js})
 
