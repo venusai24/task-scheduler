@@ -1,0 +1,11 @@
+apiVersion: astra/v1
+kind: Intent
+metadata:
+  name: data-pipeline-alpha
+spec:
+  image: python:3.9
+  script: "main.py"
+  governance:
+    mode: AUTONOMOUS
+    checks:
+      - "row_count > 0"

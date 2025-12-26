@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings" // <--- This was missing
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -37,7 +38,7 @@ func main() {
 		taskID := string(m.Data)
 		log.Printf("Received Task ID: %s", taskID)
 
-		// 4. EXECUTE (Simulating FAILURE)
+		// 4. EXECUTE
 		executeTask(taskID, js)
 
 		m.Ack()
@@ -61,16 +62,24 @@ func main() {
 
 func executeTask(id string, js nats.JetStreamContext) {
 	log.Printf(">>> STARTING Execution for %s", id)
+	time.Sleep(1 * time.Second)
 
-	// Simulate work duration
-	time.Sleep(1 * time.Second) 
+	// CHECK: Only fail if the ID contains the text "fail"
+	// Since generated IDs are random alphanumeric, they usually won't contain "fail",
+	// so tasks will SUCCEED by default.
+	if strings.Contains(id, "fail") {
+		log.Printf("!!! TASK FAILED (Simulated) for %s", id)
+		_, err := js.Publish("tasks.events.failed", []byte(id))
+		if err != nil {
+			log.Printf("Failed to publish failure event: %v", err)
+		}
+		return
+	}
 
-	// FORCE FAILURE (For Testing Governance)
-	log.Printf("!!! TASK FAILED (Simulated) for %s", id)
-
-	// Report FAILURE
-	_, err := js.Publish("tasks.events.failed", []byte(id))
+	// SUCCESS PATH
+	log.Printf("<<< FINISHED Execution for %s", id)
+	_, err := js.Publish("tasks.events.completed", []byte(id))
 	if err != nil {
-		log.Printf("Failed to report failure: %v", err)
+		log.Printf("Failed to publish completion event: %v", err)
 	}
 }
