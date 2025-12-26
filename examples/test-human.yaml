@@ -1,0 +1,6 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  governance:
+    mode: "HUMAN_GATE"
+  script: "exit 1"

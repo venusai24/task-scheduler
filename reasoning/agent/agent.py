@@ -36,7 +36,20 @@ async def main():
     print(f"👀 Watching for failures on '{subject}'...")
     
     async def message_handler(msg):
-        task_id = msg.data.decode()
+        # Safely decode the task ID
+        try:
+            task_id = msg.data.decode('utf-8')
+        except UnicodeDecodeError:
+            print(f"❌ ERR: Received non-UTF8 data on {msg.subject}. Check scheduler publisher.")
+            await msg.ack()  # Ack it anyway to clear the queue
+            return
+        
+        # Validate task_id is not empty
+        if not task_id or not task_id.strip():
+            print(f"❌ ERR: Received empty task ID on {msg.subject}")
+            await msg.ack()
+            return
+
         print(f"\n[ANALYSIS] Received Failed Task: {task_id}")
 
         # Simulate Thinking

@@ -21,13 +21,12 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// The Governance Mode (Safety Switch)
 type GovernanceMode int32
 
 const (
-	GovernanceMode_ADVISORY_ONLY GovernanceMode = 0 // AI suggests, Human/Code decides
-	GovernanceMode_AUTONOMOUS    GovernanceMode = 1 // AI decides
-	GovernanceMode_HUMAN_GATE    GovernanceMode = 2 // Stop and wait for human click
+	GovernanceMode_ADVISORY_ONLY GovernanceMode = 0
+	GovernanceMode_AUTONOMOUS    GovernanceMode = 1
+	GovernanceMode_HUMAN_GATE    GovernanceMode = 2
 )
 
 // Enum value maps for GovernanceMode.
@@ -71,16 +70,16 @@ func (GovernanceMode) EnumDescriptor() ([]byte, []int) {
 	return file_proto_sched_proto_rawDescGZIP(), []int{0}
 }
 
-// The State Machine
 type TaskState int32
 
 const (
-	TaskState_CREATED   TaskState = 0
-	TaskState_PENDING   TaskState = 1
-	TaskState_RUNNING   TaskState = 2
-	TaskState_COMPLETED TaskState = 3
-	TaskState_FAILED    TaskState = 4
-	TaskState_ANALYZING TaskState = 5 // AI is looking at it
+	TaskState_CREATED        TaskState = 0
+	TaskState_PENDING        TaskState = 1
+	TaskState_RUNNING        TaskState = 2
+	TaskState_COMPLETED      TaskState = 3
+	TaskState_FAILED         TaskState = 4
+	TaskState_ANALYZING      TaskState = 5
+	TaskState_NEEDS_APPROVAL TaskState = 6 // <--- Add this
 )
 
 // Enum value maps for TaskState.
@@ -92,14 +91,16 @@ var (
 		3: "COMPLETED",
 		4: "FAILED",
 		5: "ANALYZING",
+		6: "NEEDS_APPROVAL",
 	}
 	TaskState_value = map[string]int32{
-		"CREATED":   0,
-		"PENDING":   1,
-		"RUNNING":   2,
-		"COMPLETED": 3,
-		"FAILED":    4,
-		"ANALYZING": 5,
+		"CREATED":        0,
+		"PENDING":        1,
+		"RUNNING":        2,
+		"COMPLETED":      3,
+		"FAILED":         4,
+		"ANALYZING":      5,
+		"NEEDS_APPROVAL": 6,
 	}
 )
 
@@ -130,16 +131,15 @@ func (TaskState) EnumDescriptor() ([]byte, []int) {
 	return file_proto_sched_proto_rawDescGZIP(), []int{1}
 }
 
-// The core Task definition
 type Task struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	IntentYaml    string                 `protobuf:"bytes,2,opt,name=intent_yaml,json=intentYaml,proto3" json:"intent_yaml,omitempty"` // Store original YAML
+	IntentYaml    string                 `protobuf:"bytes,2,opt,name=intent_yaml,json=intentYaml,proto3" json:"intent_yaml,omitempty"`
 	State         TaskState              `protobuf:"varint,3,opt,name=state,proto3,enum=sched.TaskState" json:"state,omitempty"`
 	Mode          GovernanceMode         `protobuf:"varint,4,opt,name=mode,proto3,enum=sched.GovernanceMode" json:"mode,omitempty"`
 	RetryCount    int32                  `protobuf:"varint,5,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
 	Logs          []string               `protobuf:"bytes,6,rep,name=logs,proto3" json:"logs,omitempty"`
-	AiInsight     string                 `protobuf:"bytes,7,opt,name=ai_insight,json=aiInsight,proto3" json:"ai_insight,omitempty"` // The AI's JSON analysis
+	AiInsight     string                 `protobuf:"bytes,7,opt,name=ai_insight,json=aiInsight,proto3" json:"ai_insight,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -223,6 +223,102 @@ func (x *Task) GetAiInsight() string {
 	return ""
 }
 
+type ApproveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApproveRequest) Reset() {
+	*x = ApproveRequest{}
+	mi := &file_proto_sched_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApproveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApproveRequest) ProtoMessage() {}
+
+func (x *ApproveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_sched_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApproveRequest.ProtoReflect.Descriptor instead.
+func (*ApproveRequest) Descriptor() ([]byte, []int) {
+	return file_proto_sched_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ApproveRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type ApproveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApproveResponse) Reset() {
+	*x = ApproveResponse{}
+	mi := &file_proto_sched_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApproveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApproveResponse) ProtoMessage() {}
+
+func (x *ApproveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_sched_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApproveResponse.ProtoReflect.Descriptor instead.
+func (*ApproveResponse) Descriptor() ([]byte, []int) {
+	return file_proto_sched_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ApproveResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ApproveResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type SubmitRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	YamlContent   string                 `protobuf:"bytes,1,opt,name=yaml_content,json=yamlContent,proto3" json:"yaml_content,omitempty"`
@@ -232,7 +328,7 @@ type SubmitRequest struct {
 
 func (x *SubmitRequest) Reset() {
 	*x = SubmitRequest{}
-	mi := &file_proto_sched_proto_msgTypes[1]
+	mi := &file_proto_sched_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -244,7 +340,7 @@ func (x *SubmitRequest) String() string {
 func (*SubmitRequest) ProtoMessage() {}
 
 func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[1]
+	mi := &file_proto_sched_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -257,7 +353,7 @@ func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitRequest.ProtoReflect.Descriptor instead.
 func (*SubmitRequest) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{1}
+	return file_proto_sched_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SubmitRequest) GetYamlContent() string {
@@ -276,7 +372,7 @@ type SubmitResponse struct {
 
 func (x *SubmitResponse) Reset() {
 	*x = SubmitResponse{}
-	mi := &file_proto_sched_proto_msgTypes[2]
+	mi := &file_proto_sched_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -288,7 +384,7 @@ func (x *SubmitResponse) String() string {
 func (*SubmitResponse) ProtoMessage() {}
 
 func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[2]
+	mi := &file_proto_sched_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -301,7 +397,7 @@ func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitResponse.ProtoReflect.Descriptor instead.
 func (*SubmitResponse) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{2}
+	return file_proto_sched_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SubmitResponse) GetTaskId() string {
@@ -320,7 +416,7 @@ type TaskRequest struct {
 
 func (x *TaskRequest) Reset() {
 	*x = TaskRequest{}
-	mi := &file_proto_sched_proto_msgTypes[3]
+	mi := &file_proto_sched_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -332,7 +428,7 @@ func (x *TaskRequest) String() string {
 func (*TaskRequest) ProtoMessage() {}
 
 func (x *TaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[3]
+	mi := &file_proto_sched_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -345,7 +441,7 @@ func (x *TaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskRequest.ProtoReflect.Descriptor instead.
 func (*TaskRequest) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{3}
+	return file_proto_sched_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TaskRequest) GetTaskId() string {
@@ -364,7 +460,7 @@ type TaskResponse struct {
 
 func (x *TaskResponse) Reset() {
 	*x = TaskResponse{}
-	mi := &file_proto_sched_proto_msgTypes[4]
+	mi := &file_proto_sched_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -376,7 +472,7 @@ func (x *TaskResponse) String() string {
 func (*TaskResponse) ProtoMessage() {}
 
 func (x *TaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[4]
+	mi := &file_proto_sched_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -389,7 +485,7 @@ func (x *TaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResponse.ProtoReflect.Descriptor instead.
 func (*TaskResponse) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{4}
+	return file_proto_sched_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TaskResponse) GetTask() *Task {
@@ -414,7 +510,12 @@ const file_proto_sched_proto_rawDesc = "" +
 	"retryCount\x12\x12\n" +
 	"\x04logs\x18\x06 \x03(\tR\x04logs\x12\x1d\n" +
 	"\n" +
-	"ai_insight\x18\a \x01(\tR\taiInsight\"2\n" +
+	"ai_insight\x18\a \x01(\tR\taiInsight\")\n" +
+	"\x0eApproveRequest\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"E\n" +
+	"\x0fApproveResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"2\n" +
 	"\rSubmitRequest\x12!\n" +
 	"\fyaml_content\x18\x01 \x01(\tR\vyamlContent\")\n" +
 	"\x0eSubmitResponse\x12\x17\n" +
@@ -428,7 +529,7 @@ const file_proto_sched_proto_rawDesc = "" +
 	"\n" +
 	"AUTONOMOUS\x10\x01\x12\x0e\n" +
 	"\n" +
-	"HUMAN_GATE\x10\x02*\\\n" +
+	"HUMAN_GATE\x10\x02*p\n" +
 	"\tTaskState\x12\v\n" +
 	"\aCREATED\x10\x00\x12\v\n" +
 	"\aPENDING\x10\x01\x12\v\n" +
@@ -436,10 +537,12 @@ const file_proto_sched_proto_rawDesc = "" +
 	"\tCOMPLETED\x10\x03\x12\n" +
 	"\n" +
 	"\x06FAILED\x10\x04\x12\r\n" +
-	"\tANALYZING\x10\x052\x7f\n" +
+	"\tANALYZING\x10\x05\x12\x12\n" +
+	"\x0eNEEDS_APPROVAL\x10\x062\xbd\x01\n" +
 	"\fSchedService\x12;\n" +
 	"\fSubmitIntent\x12\x14.sched.SubmitRequest\x1a\x15.sched.SubmitResponse\x122\n" +
-	"\aGetTask\x12\x12.sched.TaskRequest\x1a\x13.sched.TaskResponseB+Z)github.com/venusai24/task-scheduler/protob\x06proto3"
+	"\aGetTask\x12\x12.sched.TaskRequest\x1a\x13.sched.TaskResponse\x12<\n" +
+	"\vApproveTask\x12\x15.sched.ApproveRequest\x1a\x16.sched.ApproveResponseB+Z)github.com/venusai24/task-scheduler/protob\x06proto3"
 
 var (
 	file_proto_sched_proto_rawDescOnce sync.Once
@@ -454,26 +557,30 @@ func file_proto_sched_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_sched_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_sched_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proto_sched_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_proto_sched_proto_goTypes = []any{
-	(GovernanceMode)(0),    // 0: sched.GovernanceMode
-	(TaskState)(0),         // 1: sched.TaskState
-	(*Task)(nil),           // 2: sched.Task
-	(*SubmitRequest)(nil),  // 3: sched.SubmitRequest
-	(*SubmitResponse)(nil), // 4: sched.SubmitResponse
-	(*TaskRequest)(nil),    // 5: sched.TaskRequest
-	(*TaskResponse)(nil),   // 6: sched.TaskResponse
+	(GovernanceMode)(0),     // 0: sched.GovernanceMode
+	(TaskState)(0),          // 1: sched.TaskState
+	(*Task)(nil),            // 2: sched.Task
+	(*ApproveRequest)(nil),  // 3: sched.ApproveRequest
+	(*ApproveResponse)(nil), // 4: sched.ApproveResponse
+	(*SubmitRequest)(nil),   // 5: sched.SubmitRequest
+	(*SubmitResponse)(nil),  // 6: sched.SubmitResponse
+	(*TaskRequest)(nil),     // 7: sched.TaskRequest
+	(*TaskResponse)(nil),    // 8: sched.TaskResponse
 }
 var file_proto_sched_proto_depIdxs = []int32{
 	1, // 0: sched.Task.state:type_name -> sched.TaskState
 	0, // 1: sched.Task.mode:type_name -> sched.GovernanceMode
 	2, // 2: sched.TaskResponse.task:type_name -> sched.Task
-	3, // 3: sched.SchedService.SubmitIntent:input_type -> sched.SubmitRequest
-	5, // 4: sched.SchedService.GetTask:input_type -> sched.TaskRequest
-	4, // 5: sched.SchedService.SubmitIntent:output_type -> sched.SubmitResponse
-	6, // 6: sched.SchedService.GetTask:output_type -> sched.TaskResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
+	5, // 3: sched.SchedService.SubmitIntent:input_type -> sched.SubmitRequest
+	7, // 4: sched.SchedService.GetTask:input_type -> sched.TaskRequest
+	3, // 5: sched.SchedService.ApproveTask:input_type -> sched.ApproveRequest
+	6, // 6: sched.SchedService.SubmitIntent:output_type -> sched.SubmitResponse
+	8, // 7: sched.SchedService.GetTask:output_type -> sched.TaskResponse
+	4, // 8: sched.SchedService.ApproveTask:output_type -> sched.ApproveResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name
@@ -490,7 +597,7 @@ func file_proto_sched_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_sched_proto_rawDesc), len(file_proto_sched_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

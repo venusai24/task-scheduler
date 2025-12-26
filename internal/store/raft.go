@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	raftboltdb "github.com/hashicorp/raft-boltdb"
+	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 )
 
 // Open initializes the Raft node
@@ -32,11 +32,13 @@ func (s *Store) Open(localID, raftDir, raftAddr string) error {
 		return err
 	}
 	
+	// Create log store with raft-boltdb v2 (better transaction handling)
 	logStore, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "raft-log.bolt"))
 	if err != nil {
 		return err
 	}
 	
+	// Create stable store with raft-boltdb v2 (better transaction handling)
 	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "raft-stable.bolt"))
 	if err != nil {
 		return err
@@ -62,5 +64,15 @@ func (s *Store) Open(localID, raftDir, raftAddr string) error {
 	}
 	s.raft.BootstrapCluster(configuration)
 
+	return nil
+}
+
+// Close gracefully shuts down Raft and associated stores
+func (s *Store) Close() error {
+	if s.raft != nil {
+		if err := s.raft.Shutdown().Error(); err != nil {
+			return err
+		}
+	}
 	return nil
 }

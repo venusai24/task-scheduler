@@ -1,0 +1,6 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  governance:
+    mode: "AUTONOMOUS"
+  script: "echo 'This will fail'; exit 1"

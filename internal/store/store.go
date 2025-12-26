@@ -26,6 +26,13 @@ func NewStore() *Store {
 	}
 }
 
+// SetRaft safely sets the Raft instance
+func (s *Store) SetRaft(r *raft.Raft) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.raft = r
+}
+
 // -- RAFT FSM IMPLEMENTATION --
 
 // Apply is called by Raft when a log is committed.
@@ -34,7 +41,8 @@ func (s *Store) Apply(l *raft.Log) interface{} {
 
 	// We assume the log data is just the JSON of the Task
 	if err := json.Unmarshal(l.Data, &task); err != nil {
-		return err
+		// Return error but don't panic - Raft will handle it
+		return fmt.Errorf("failed to unmarshal task: %w", err)
 	}
 
 	s.mu.Lock()
@@ -60,11 +68,17 @@ func (s *Store) Snapshot() (raft.FSMSnapshot, error) {
 
 // Restore loads the state from a snapshot
 func (s *Store) Restore(rc io.ReadCloser) error {
+	defer rc.Close() // Ensure the reader is always closed
+
 	o := make(map[string]*pb.Task)
 	if err := json.NewDecoder(rc).Decode(&o); err != nil {
-		return err
+		return fmt.Errorf("failed to decode snapshot: %w", err)
 	}
+
+	s.mu.Lock()
 	s.tasks = o
+	s.mu.Unlock()
+
 	return nil
 }
 
@@ -166,7 +180,7 @@ func (s *Store) IncrementRetry(id string) (int32, error) {
 	updatedTask := *task
 	updatedTask.RetryCount++
 	updatedTask.State = pb.TaskState_PENDING // Reset to pending so it can be picked up
-	
+
 	// Append log to history for debugging
 	updatedTask.Logs = append(updatedTask.Logs, fmt.Sprintf("Retry #%d triggered at %s", updatedTask.RetryCount, time.Now().Format(time.RFC3339)))
 
@@ -174,10 +188,26 @@ func (s *Store) IncrementRetry(id string) (int32, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	if err := s.raft.Apply(b, 10*time.Second).Error(); err != nil {
 		return 0, err
 	}
 
 	return updatedTask.RetryCount, nil
+}
+
+// GetRaftState returns the current Raft state (Follower, Candidate, Leader, Shutdown)
+func (s *Store) GetRaftState() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.raft == nil {
+		return "Shutdown"
+	}
+	return s.raft.State().String()
+}
+
+// IsLeader returns true if this node is the Raft leader
+func (s *Store) IsLeader() bool {
+	return s.GetRaftState() == "Leader"
 }
