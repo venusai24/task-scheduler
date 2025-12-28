@@ -1,22 +1,19 @@
+# Ignore certificate files and keys
 certs/
-reasoning/venv/
-data/node-1/raft-log.bolt
-data/node-1/raft-stable.bolt
-data/node-1/raft-stable.bolt
-data/node-1/raft-log.bolt
-data/node-1/raft-log.bolt
-data/node-1/raft-log.bolt
-data/node-1/raft-log.bolt
-data/node-1/raft-log.bolt
-data/node-1/raft-stable.bolt
 server.crt
-certs/
 server.key
+
+# Ignore generated CA and client certs
 certs/ca.crt
-certs/ca.crt
+certs/ca.key
 certs/client.crt
-certs/ca.key
-certs/ca.crt
-certs/ca.key
-certs/ca.crt
+
+# Ignore virtualenv and reasoning artifacts
+reasoning/venv/
+
+# Ignore Raft data and other runtime data directories
 data/
+
+# Ignore node-specific bolt files (explicit if needed)
+data/**/raft-log.bolt
+data/**/raft-stable.bolt
