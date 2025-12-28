@@ -140,6 +140,7 @@ type Task struct {
 	RetryCount    int32                  `protobuf:"varint,5,opt,name=retry_count,json=retryCount,proto3" json:"retry_count,omitempty"`
 	Logs          []string               `protobuf:"bytes,6,rep,name=logs,proto3" json:"logs,omitempty"`
 	AiInsight     string                 `protobuf:"bytes,7,opt,name=ai_insight,json=aiInsight,proto3" json:"ai_insight,omitempty"`
+	IsSimulation  bool                   `protobuf:"varint,8,opt,name=is_simulation,json=isSimulation,proto3" json:"is_simulation,omitempty"` // <--- Add this
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -221,6 +222,13 @@ func (x *Task) GetAiInsight() string {
 		return x.AiInsight
 	}
 	return ""
+}
+
+func (x *Task) GetIsSimulation() bool {
+	if x != nil {
+		return x.IsSimulation
+	}
+	return false
 }
 
 type ApproveRequest struct {
@@ -319,16 +327,113 @@ func (x *ApproveResponse) GetMessage() string {
 	return ""
 }
 
+type RollbackRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollbackRequest) Reset() {
+	*x = RollbackRequest{}
+	mi := &file_proto_sched_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackRequest) ProtoMessage() {}
+
+func (x *RollbackRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_sched_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackRequest.ProtoReflect.Descriptor instead.
+func (*RollbackRequest) Descriptor() ([]byte, []int) {
+	return file_proto_sched_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RollbackRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type RollbackResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollbackResponse) Reset() {
+	*x = RollbackResponse{}
+	mi := &file_proto_sched_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollbackResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollbackResponse) ProtoMessage() {}
+
+func (x *RollbackResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_sched_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollbackResponse.ProtoReflect.Descriptor instead.
+func (*RollbackResponse) Descriptor() ([]byte, []int) {
+	return file_proto_sched_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RollbackResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *RollbackResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type SubmitRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	YamlContent   string                 `protobuf:"bytes,1,opt,name=yaml_content,json=yamlContent,proto3" json:"yaml_content,omitempty"`
+	DryRun        bool                   `protobuf:"varint,2,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"` // <--- Add this
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SubmitRequest) Reset() {
 	*x = SubmitRequest{}
-	mi := &file_proto_sched_proto_msgTypes[3]
+	mi := &file_proto_sched_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -340,7 +445,7 @@ func (x *SubmitRequest) String() string {
 func (*SubmitRequest) ProtoMessage() {}
 
 func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[3]
+	mi := &file_proto_sched_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -353,7 +458,7 @@ func (x *SubmitRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitRequest.ProtoReflect.Descriptor instead.
 func (*SubmitRequest) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{3}
+	return file_proto_sched_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SubmitRequest) GetYamlContent() string {
@@ -361,6 +466,13 @@ func (x *SubmitRequest) GetYamlContent() string {
 		return x.YamlContent
 	}
 	return ""
+}
+
+func (x *SubmitRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
 }
 
 type SubmitResponse struct {
@@ -372,7 +484,7 @@ type SubmitResponse struct {
 
 func (x *SubmitResponse) Reset() {
 	*x = SubmitResponse{}
-	mi := &file_proto_sched_proto_msgTypes[4]
+	mi := &file_proto_sched_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -384,7 +496,7 @@ func (x *SubmitResponse) String() string {
 func (*SubmitResponse) ProtoMessage() {}
 
 func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[4]
+	mi := &file_proto_sched_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -397,7 +509,7 @@ func (x *SubmitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitResponse.ProtoReflect.Descriptor instead.
 func (*SubmitResponse) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{4}
+	return file_proto_sched_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SubmitResponse) GetTaskId() string {
@@ -416,7 +528,7 @@ type TaskRequest struct {
 
 func (x *TaskRequest) Reset() {
 	*x = TaskRequest{}
-	mi := &file_proto_sched_proto_msgTypes[5]
+	mi := &file_proto_sched_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -428,7 +540,7 @@ func (x *TaskRequest) String() string {
 func (*TaskRequest) ProtoMessage() {}
 
 func (x *TaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[5]
+	mi := &file_proto_sched_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +553,7 @@ func (x *TaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskRequest.ProtoReflect.Descriptor instead.
 func (*TaskRequest) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{5}
+	return file_proto_sched_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TaskRequest) GetTaskId() string {
@@ -460,7 +572,7 @@ type TaskResponse struct {
 
 func (x *TaskResponse) Reset() {
 	*x = TaskResponse{}
-	mi := &file_proto_sched_proto_msgTypes[6]
+	mi := &file_proto_sched_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -472,7 +584,7 @@ func (x *TaskResponse) String() string {
 func (*TaskResponse) ProtoMessage() {}
 
 func (x *TaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_sched_proto_msgTypes[6]
+	mi := &file_proto_sched_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -485,7 +597,7 @@ func (x *TaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResponse.ProtoReflect.Descriptor instead.
 func (*TaskResponse) Descriptor() ([]byte, []int) {
-	return file_proto_sched_proto_rawDescGZIP(), []int{6}
+	return file_proto_sched_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TaskResponse) GetTask() *Task {
@@ -499,7 +611,7 @@ var File_proto_sched_proto protoreflect.FileDescriptor
 
 const file_proto_sched_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/sched.proto\x12\x05sched\"\xde\x01\n" +
+	"\x11proto/sched.proto\x12\x05sched\"\x83\x02\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vintent_yaml\x18\x02 \x01(\tR\n" +
@@ -510,14 +622,21 @@ const file_proto_sched_proto_rawDesc = "" +
 	"retryCount\x12\x12\n" +
 	"\x04logs\x18\x06 \x03(\tR\x04logs\x12\x1d\n" +
 	"\n" +
-	"ai_insight\x18\a \x01(\tR\taiInsight\")\n" +
+	"ai_insight\x18\a \x01(\tR\taiInsight\x12#\n" +
+	"\ris_simulation\x18\b \x01(\bR\fisSimulation\")\n" +
 	"\x0eApproveRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\"E\n" +
 	"\x0fApproveResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"2\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"*\n" +
+	"\x0fRollbackRequest\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"F\n" +
+	"\x10RollbackResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"K\n" +
 	"\rSubmitRequest\x12!\n" +
-	"\fyaml_content\x18\x01 \x01(\tR\vyamlContent\")\n" +
+	"\fyaml_content\x18\x01 \x01(\tR\vyamlContent\x12\x17\n" +
+	"\adry_run\x18\x02 \x01(\bR\x06dryRun\")\n" +
 	"\x0eSubmitResponse\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\"&\n" +
 	"\vTaskRequest\x12\x17\n" +
@@ -538,11 +657,12 @@ const file_proto_sched_proto_rawDesc = "" +
 	"\n" +
 	"\x06FAILED\x10\x04\x12\r\n" +
 	"\tANALYZING\x10\x05\x12\x12\n" +
-	"\x0eNEEDS_APPROVAL\x10\x062\xbd\x01\n" +
+	"\x0eNEEDS_APPROVAL\x10\x062\xfe\x01\n" +
 	"\fSchedService\x12;\n" +
 	"\fSubmitIntent\x12\x14.sched.SubmitRequest\x1a\x15.sched.SubmitResponse\x122\n" +
 	"\aGetTask\x12\x12.sched.TaskRequest\x1a\x13.sched.TaskResponse\x12<\n" +
-	"\vApproveTask\x12\x15.sched.ApproveRequest\x1a\x16.sched.ApproveResponseB+Z)github.com/venusai24/task-scheduler/protob\x06proto3"
+	"\vApproveTask\x12\x15.sched.ApproveRequest\x1a\x16.sched.ApproveResponse\x12?\n" +
+	"\fRollbackTask\x12\x16.sched.RollbackRequest\x1a\x17.sched.RollbackResponseB+Z)github.com/venusai24/task-scheduler/protob\x06proto3"
 
 var (
 	file_proto_sched_proto_rawDescOnce sync.Once
@@ -557,33 +677,37 @@ func file_proto_sched_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_sched_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_sched_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_proto_sched_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_proto_sched_proto_goTypes = []any{
-	(GovernanceMode)(0),     // 0: sched.GovernanceMode
-	(TaskState)(0),          // 1: sched.TaskState
-	(*Task)(nil),            // 2: sched.Task
-	(*ApproveRequest)(nil),  // 3: sched.ApproveRequest
-	(*ApproveResponse)(nil), // 4: sched.ApproveResponse
-	(*SubmitRequest)(nil),   // 5: sched.SubmitRequest
-	(*SubmitResponse)(nil),  // 6: sched.SubmitResponse
-	(*TaskRequest)(nil),     // 7: sched.TaskRequest
-	(*TaskResponse)(nil),    // 8: sched.TaskResponse
+	(GovernanceMode)(0),      // 0: sched.GovernanceMode
+	(TaskState)(0),           // 1: sched.TaskState
+	(*Task)(nil),             // 2: sched.Task
+	(*ApproveRequest)(nil),   // 3: sched.ApproveRequest
+	(*ApproveResponse)(nil),  // 4: sched.ApproveResponse
+	(*RollbackRequest)(nil),  // 5: sched.RollbackRequest
+	(*RollbackResponse)(nil), // 6: sched.RollbackResponse
+	(*SubmitRequest)(nil),    // 7: sched.SubmitRequest
+	(*SubmitResponse)(nil),   // 8: sched.SubmitResponse
+	(*TaskRequest)(nil),      // 9: sched.TaskRequest
+	(*TaskResponse)(nil),     // 10: sched.TaskResponse
 }
 var file_proto_sched_proto_depIdxs = []int32{
-	1, // 0: sched.Task.state:type_name -> sched.TaskState
-	0, // 1: sched.Task.mode:type_name -> sched.GovernanceMode
-	2, // 2: sched.TaskResponse.task:type_name -> sched.Task
-	5, // 3: sched.SchedService.SubmitIntent:input_type -> sched.SubmitRequest
-	7, // 4: sched.SchedService.GetTask:input_type -> sched.TaskRequest
-	3, // 5: sched.SchedService.ApproveTask:input_type -> sched.ApproveRequest
-	6, // 6: sched.SchedService.SubmitIntent:output_type -> sched.SubmitResponse
-	8, // 7: sched.SchedService.GetTask:output_type -> sched.TaskResponse
-	4, // 8: sched.SchedService.ApproveTask:output_type -> sched.ApproveResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	1,  // 0: sched.Task.state:type_name -> sched.TaskState
+	0,  // 1: sched.Task.mode:type_name -> sched.GovernanceMode
+	2,  // 2: sched.TaskResponse.task:type_name -> sched.Task
+	7,  // 3: sched.SchedService.SubmitIntent:input_type -> sched.SubmitRequest
+	9,  // 4: sched.SchedService.GetTask:input_type -> sched.TaskRequest
+	3,  // 5: sched.SchedService.ApproveTask:input_type -> sched.ApproveRequest
+	5,  // 6: sched.SchedService.RollbackTask:input_type -> sched.RollbackRequest
+	8,  // 7: sched.SchedService.SubmitIntent:output_type -> sched.SubmitResponse
+	10, // 8: sched.SchedService.GetTask:output_type -> sched.TaskResponse
+	4,  // 9: sched.SchedService.ApproveTask:output_type -> sched.ApproveResponse
+	6,  // 10: sched.SchedService.RollbackTask:output_type -> sched.RollbackResponse
+	7,  // [7:11] is the sub-list for method output_type
+	3,  // [3:7] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_proto_sched_proto_init() }
@@ -597,7 +721,7 @@ func file_proto_sched_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_sched_proto_rawDesc), len(file_proto_sched_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

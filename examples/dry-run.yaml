@@ -1,0 +1,7 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  goal: "Verify simulation logic"
+  governance:
+    mode: "ADVISORY_ONLY"
+  script: "echo 'This script should NOT be executed by the worker'; exit 0"

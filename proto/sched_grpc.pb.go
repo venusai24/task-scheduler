@@ -22,6 +22,7 @@ const (
 	SchedService_SubmitIntent_FullMethodName = "/sched.SchedService/SubmitIntent"
 	SchedService_GetTask_FullMethodName      = "/sched.SchedService/GetTask"
 	SchedService_ApproveTask_FullMethodName  = "/sched.SchedService/ApproveTask"
+	SchedService_RollbackTask_FullMethodName = "/sched.SchedService/RollbackTask"
 )
 
 // SchedServiceClient is the client API for SchedService service.
@@ -31,6 +32,7 @@ type SchedServiceClient interface {
 	SubmitIntent(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
 	GetTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
 	ApproveTask(ctx context.Context, in *ApproveRequest, opts ...grpc.CallOption) (*ApproveResponse, error)
+	RollbackTask(ctx context.Context, in *RollbackRequest, opts ...grpc.CallOption) (*RollbackResponse, error)
 }
 
 type schedServiceClient struct {
@@ -71,6 +73,16 @@ func (c *schedServiceClient) ApproveTask(ctx context.Context, in *ApproveRequest
 	return out, nil
 }
 
+func (c *schedServiceClient) RollbackTask(ctx context.Context, in *RollbackRequest, opts ...grpc.CallOption) (*RollbackResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RollbackResponse)
+	err := c.cc.Invoke(ctx, SchedService_RollbackTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SchedServiceServer is the server API for SchedService service.
 // All implementations must embed UnimplementedSchedServiceServer
 // for forward compatibility.
@@ -78,6 +90,7 @@ type SchedServiceServer interface {
 	SubmitIntent(context.Context, *SubmitRequest) (*SubmitResponse, error)
 	GetTask(context.Context, *TaskRequest) (*TaskResponse, error)
 	ApproveTask(context.Context, *ApproveRequest) (*ApproveResponse, error)
+	RollbackTask(context.Context, *RollbackRequest) (*RollbackResponse, error)
 	mustEmbedUnimplementedSchedServiceServer()
 }
 
@@ -96,6 +109,9 @@ func (UnimplementedSchedServiceServer) GetTask(context.Context, *TaskRequest) (*
 }
 func (UnimplementedSchedServiceServer) ApproveTask(context.Context, *ApproveRequest) (*ApproveResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ApproveTask not implemented")
+}
+func (UnimplementedSchedServiceServer) RollbackTask(context.Context, *RollbackRequest) (*RollbackResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RollbackTask not implemented")
 }
 func (UnimplementedSchedServiceServer) mustEmbedUnimplementedSchedServiceServer() {}
 func (UnimplementedSchedServiceServer) testEmbeddedByValue()                      {}
@@ -172,6 +188,24 @@ func _SchedService_ApproveTask_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SchedService_RollbackTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RollbackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SchedServiceServer).RollbackTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SchedService_RollbackTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SchedServiceServer).RollbackTask(ctx, req.(*RollbackRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SchedService_ServiceDesc is the grpc.ServiceDesc for SchedService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -190,6 +224,10 @@ var SchedService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ApproveTask",
 			Handler:    _SchedService_ApproveTask_Handler,
+		},
+		{
+			MethodName: "RollbackTask",
+			Handler:    _SchedService_RollbackTask_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

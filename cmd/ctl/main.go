@@ -28,6 +28,9 @@ func main() {
 	approveCmd := flag.NewFlagSet("approve", flag.ExitOnError)
 	appIDPtr := approveCmd.String("id", "", "Task ID to approve")
 
+	rollbackCmd := flag.NewFlagSet("rollback", flag.ExitOnError)
+	rollbackIDPtr := rollbackCmd.String("id", "", "Task ID to rollback")
+
 	if len(os.Args) < 2 {
 		printHelp()
 		os.Exit(1)
@@ -35,6 +38,7 @@ func main() {
 
 	// Connect to Scheduler with mTLS if configured
 	var conn *grpc.ClientConn
+	var err error // Add this line
 	caFile := os.Getenv("SCHED_CA_FILE")
 
 	if caFile != "" {
@@ -80,6 +84,13 @@ func main() {
 			return
 		}
 		handleApprove(client, *appIDPtr)
+	case "rollback":
+		rollbackCmd.Parse(os.Args[2:])
+		if *rollbackIDPtr == "" {
+			fmt.Println("Error: Please provide an ID using -id <task_id>")
+			return
+		}
+		handleRollback(client, *rollbackIDPtr)
 	default:
 		printHelp()
 	}
@@ -91,13 +102,13 @@ func handleSubmit(client pb.SchedServiceClient, path string, dryRun bool) {
 		log.Fatalf("Failed to read file: %v", err)
 	}
 
-	// Add auth token to context
-	authToken := os.Getenv("SCHED_AUTH_TOKEN")
-	if authToken == "" {
-		authToken = "my-secret-key" // Default for development
+	// Require auth token from environment
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
 	}
 
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", authToken)
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
@@ -114,20 +125,20 @@ func handleSubmit(client pb.SchedServiceClient, path string, dryRun bool) {
 		log.Fatalf("Submission failed: %v", err)
 	}
 
-	if dryRun {
+	if dryRun{
 		fmt.Printf("✅ Simulation Success! Task ID: %s (will not execute)\n", resp.TaskId)
-	} else {
+	}else{
 		fmt.Printf("✅ Success! Task ID: %s\n", resp.TaskId)
 	}
 }
 
-func handleGet(client pb.SchedServiceClient, id string) {
-	authToken := os.Getenv("SCHED_AUTH_TOKEN")
-	if authToken == "" {
-		authToken = "my-secret-key"
+func handleGet(client pb.SchedServiceClient, id string){
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
 	}
 
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", authToken)
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
@@ -137,35 +148,67 @@ func handleGet(client pb.SchedServiceClient, id string) {
 	}
 
 	t := resp.Task
-	fmt.Println("\n📋 AstraSched Task Report")
+	fmt.Println("\n AstraSched Task Report")
 	fmt.Println("========================")
 	fmt.Printf("ID:          %s\n", t.Id)
 	fmt.Printf("State:       %s\n", t.State)
 	fmt.Printf("Retry Count: %d\n", t.RetryCount)
 	fmt.Printf("Gov Mode:    %s\n", t.Mode)
+	if t.AiInsight != "" {
+		fmt.Printf("AI Insight:  %s\n", t.AiInsight)
+	}
+	if len(t.Logs) > 0 {
+		fmt.Println("\nExecution Logs:")
+		for _, logEntry := range t.Logs {
+			fmt.Printf("  • %s\n", logEntry)
+		}
+	}
 	fmt.Println("========================")
 }
 
 func handleApprove(client pb.SchedServiceClient, id string) {
-	authToken := os.Getenv("SCHED_AUTH_TOKEN")
-	if authToken == "" {
-		authToken = "my-secret-key"
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
 	}
 
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", authToken)
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
-	fmt.Printf("🔄 Approving task %s...\n", id)
+	fmt.Printf(" Approving task %s...\n", id)
 	resp, err := client.ApproveTask(ctx, &pb.ApproveRequest{TaskId: id})
 	if err != nil {
 		log.Fatalf("Approval failed: %v", err)
 	}
 
 	if resp.Success {
-		fmt.Printf("✅ Task %s Approved. Rescheduling...\n", id)
+		fmt.Printf(" Task %s Approved. Rescheduling...\n", id)
 	} else {
 		log.Fatalf("Approval failed: %s", resp.Message)
+	}
+}
+
+func handleRollback(client pb.SchedServiceClient, id string) {
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
+	}
+
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	fmt.Printf(" Rolling back task %s to initial state...\n", id)
+	resp, err := client.RollbackTask(ctx, &pb.RollbackRequest{TaskId: id})
+	if err != nil {
+		log.Fatalf("Rollback failed: %v", err)
+	}
+
+	if resp.Success {
+		fmt.Printf(" Task %s rolled back successfully\n", id)
+	} else {
+		log.Fatalf("Rollback failed: %s", resp.Message)
 	}
 }
 
@@ -175,4 +218,5 @@ func printHelp() {
 	fmt.Println("  astractl submit -f <file.yaml> [--dry-run]  # Submit a new task")
 	fmt.Println("  astractl get -id <task_id>                  # Check task status")
 	fmt.Println("  astractl approve -id <task_id>              # Approve a pending task")
+	fmt.Println("  astractl rollback -id <task_id>             # Rollback task to initial state")
 }

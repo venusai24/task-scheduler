@@ -196,6 +196,37 @@ func (s *Store) IncrementRetry(id string) (int32, error) {
 	return updatedTask.RetryCount, nil
 }
 
+// Rollback resets a task to its initial state
+func (s *Store) Rollback(id string) error {
+	if s.raft.State() != raft.Leader {
+		return fmt.Errorf("not leader")
+	}
+
+	s.mu.RLock()
+	task, exists := s.tasks[id]
+	s.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("task %s not found", id)
+	}
+
+	// Clone and reset to initial state
+	updated := *task
+	updated.State = pb.TaskState_CREATED
+	updated.RetryCount = 0
+	updated.Logs = append(updated.Logs, fmt.Sprintf("⏪ Task Rolled Back to Initial State at %s", time.Now().Format(time.RFC3339)))
+
+	// Clear AI insight on rollback
+	updated.AiInsight = ""
+
+	b, err := json.Marshal(&updated)
+	if err != nil {
+		return err
+	}
+
+	return s.raft.Apply(b, 10*time.Second).Error()
+}
+
 // GetRaftState returns the current Raft state (Follower, Candidate, Leader, Shutdown)
 func (s *Store) GetRaftState() string {
 	s.mu.RLock()

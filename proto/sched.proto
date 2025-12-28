@@ -33,10 +33,17 @@ service SchedService {
   rpc SubmitIntent (SubmitRequest) returns (SubmitResponse);
   rpc GetTask (TaskRequest) returns (TaskResponse);
   rpc ApproveTask (ApproveRequest) returns (ApproveResponse); // <--- Add this
+  rpc RollbackTask (RollbackRequest) returns (RollbackResponse); // <--- Add this
 }
 
 message ApproveRequest { string task_id = 1; } // <--- Add this
 message ApproveResponse {                      // <--- Add this
+    bool success = 1;
+    string message = 2;
+}
+
+message RollbackRequest { string task_id = 1; } // <--- Add this
+message RollbackResponse {                      // <--- Add this
     bool success = 1;
     string message = 2;
 }
