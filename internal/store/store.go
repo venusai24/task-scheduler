@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,14 +10,24 @@ import (
 
 	"github.com/hashicorp/raft"
 	pb "github.com/venusai24/task-scheduler/proto"
+	"go.etcd.io/bbolt"                // ← Add this
+	raftboltdb "github.com/hashicorp/raft-boltdb/v2" // ← Add this
 )
 
 // Store holds the actual data and the Raft instance
 type Store struct {
-	mu    sync.RWMutex
-	tasks map[string]*pb.Task // The "State" we are protecting
+	mu           sync.RWMutex
+	db           *bbolt.DB
+	raft         *raft.Raft
+	logStore     *raftboltdb.BoltStore
+	stableStore  *raftboltdb.BoltStore
+	transport    *raft.NetworkTransport // ← ADD THIS
+	localID      raft.ServerID          // <- NEW: keep the configured local ID
+	tasks        map[string]*pb.Task    // The "State" we are protecting
 
-	raft *raft.Raft // The Consensus mechanism
+	// lifecycle for background goroutines
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 // NewStore initializes the memory map
@@ -130,7 +141,6 @@ func (s *Store) TransitionState(id string, newState pb.TaskState) error {
 		return fmt.Errorf("not leader")
 	}
 
-	// 1. Get current task to ensure it exists
 	s.mu.RLock()
 	task, exists := s.tasks[id]
 	s.mu.RUnlock()
@@ -139,11 +149,13 @@ func (s *Store) TransitionState(id string, newState pb.TaskState) error {
 		return fmt.Errorf("task %s not found", id)
 	}
 
-	// 2. Clone and Update (Immutability pattern)
 	updatedTask := *task
 	updatedTask.State = newState
 
-	// 3. Commit to Raft
+	timestamp := time.Now().Format(time.RFC3339)
+	logEntry := fmt.Sprintf("[%s] State transitioned to %s", timestamp, newState)
+	updatedTask.Logs = append(updatedTask.Logs, logEntry)
+
 	b, err := json.Marshal(&updatedTask)
 	if err != nil {
 		return err
@@ -227,6 +239,11 @@ func (s *Store) Rollback(id string) error {
 	return s.raft.Apply(b, 10*time.Second).Error()
 }
 
+// GetLeaderAddr returns the address of the current leader (empty if no leader)
+func (s *Store) GetLeaderAddr() string {
+	return string(s.raft.Leader())
+}
+
 // GetRaftState returns the current Raft state (Follower, Candidate, Leader, Shutdown)
 func (s *Store) GetRaftState() string {
 	s.mu.RLock()
@@ -240,5 +257,5 @@ func (s *Store) GetRaftState() string {
 
 // IsLeader returns true if this node is the Raft leader
 func (s *Store) IsLeader() bool {
-	return s.GetRaftState() == "Leader"
+	return s.raft.State() == raft.Leader
 }

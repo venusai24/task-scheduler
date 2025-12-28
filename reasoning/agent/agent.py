@@ -1,9 +1,61 @@
 import asyncio
 import json
+import os
 import nats
 from nats.errors import ConnectionClosedError, TimeoutError, NoServersError
-# 1. IMPORT API OBJECTS
 from nats.js.api import ConsumerConfig, AckPolicy
+from groq import Groq
+
+# Initialize Groq Client (Ensure GROQ_API_KEY or OPENAI_API_KEY is set in your environment)
+groq_api_key = os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY")
+if not groq_api_key:
+    raise RuntimeError("Set GROQ_API_KEY or OPENAI_API_KEY with your Groq key")
+groq_client = Groq(api_key=groq_api_key)
+
+async def get_ai_verdict(task_id, error_context="Unknown execution failure"):
+    """Calls the LLM to analyze the failure and provide a verdict."""
+    prompt = f"""
+    You are an AstraSched Reasoning Agent. Analyze the following task failure and decide:
+    1. RETRY: If the error is transient (network, timeout, temporary resource issue).
+    2. STOP: If the error is a permanent code bug, configuration error, or security violation.
+
+    Task ID: {task_id}
+    Error Context: {error_context}
+
+    Return ONLY a JSON object in this format:
+    {{
+        "task_id": "{task_id}",
+        "decision": "RETRY" or "STOP",
+        "reason": "Short explanation of your reasoning"
+    }}
+    """
+    
+    try:
+        response = await asyncio.to_thread(
+            groq_client.chat.completions.create,
+            model="openai/gpt-oss-120b",
+            messages=[
+                {"role": "system", "content": "You are a specialized SRE assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=1024,
+        )
+        return json.loads(response.choices[0].message.content)
+    except json.JSONDecodeError as decode_error:
+        return {
+            "task_id": task_id,
+            "decision": "STOP",
+            "reason": f"Invalid AI response: {decode_error}",
+        }
+    except Exception as e:
+        print(f"   ❌ AI API Error: {e}")
+        # Fallback to safe default if AI fails
+        return {
+            "task_id": task_id,
+            "decision": "STOP",
+            "reason": f"AI Agent Error: {str(e)}"
+        }
 
 async def main():
     # Connect to NATS
@@ -16,76 +68,50 @@ async def main():
 
     js = nc.jetstream()
 
-    # ---------------------------------------------------------
-    # 0. ENSURE STREAM EXISTS
-    # ---------------------------------------------------------
+    # Ensure Stream exists
     try:
         await js.add_stream(name="TASKS", subjects=["tasks.>"])
-        print("🌊 Stream 'TASKS' verified.")
     except Exception:
-        pass # Stream exists
+        pass 
 
-    # ---------------------------------------------------------
-    # 1. SUBSCRIBE WITH EXPLICIT CONFIGURATION
-    # ---------------------------------------------------------
-    # We use a new name to avoid conflicts with the broken v3/v4 consumers
-    durable_name = "ai-agent-explicit"
+    durable_name = "ai-agent-v2"
     queue_group = "ai-reasoning-group"
     subject = "tasks.events.failed"
 
-    print(f"👀 Watching for failures on '{subject}'...")
+    print(f"👀 Watching for failures on '{subject}' using Real AI...")
     
     async def message_handler(msg):
-        # Safely decode the task ID
         try:
-            task_id = msg.data.decode('utf-8')
-        except UnicodeDecodeError:
-            print(f"❌ ERR: Received non-UTF8 data on {msg.subject}. Check scheduler publisher.")
-            await msg.ack()  # Ack it anyway to clear the queue
+            data = json.loads(msg.data.decode('utf-8'))
+            task_id = data.get("task_id")
+            error_msg = data.get("error", "Unknown execution failure")
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            print(f"❌ ERR: Failed to parse message: {e}")
+            await msg.ack()
             return
         
-        # Validate task_id is not empty
         if not task_id or not task_id.strip():
-            print(f"❌ ERR: Received empty task ID on {msg.subject}")
             await msg.ack()
             return
 
         print(f"\n[ANALYSIS] Received Failed Task: {task_id}")
+        print(f"   Error Log: {error_msg}")
 
-        # Simulate Thinking
-        await asyncio.sleep(2) 
+        # CALL REAL AI with actual error context
+        verdict = await get_ai_verdict(task_id, error_context=error_msg)
 
-        # Heuristic Logic
-        last_char = task_id[-1]
-        decision = "RETRY" 
-        reason = "Transient Network Glitch (Simulated)"
-        
-        # ASCII check: Odd = STOP, Even = RETRY
-        if ord(last_char) % 2 != 0:
-            decision = "STOP"
-            reason = "Segmentation Fault (Code Bug)"
+        print(f"   Verdict: {verdict['decision']} because {verdict['reason']}")
 
-        print(f"   Verdict: {decision} because {reason}")
-
-        # Publish Verdict
-        payload = {
-            "task_id": task_id,
-            "decision": decision,
-            "reason": reason
-        }
-        
         try:
             await js.publish(
                 "tasks.governance.verdict", 
-                json.dumps(payload).encode()
+                json.dumps(verdict).encode()
             )
             print("   Sent verdict to Scheduler.")
             await msg.ack()
         except Exception as e:
             print(f"   ERR: Could not publish/ack: {e}")
 
-    # DEFINE CONFIGURATION
-    # This forces the server to set 'deliver_group', preventing the error.
     conf = ConsumerConfig(
         durable_name=durable_name,
         deliver_group=queue_group,
@@ -96,8 +122,8 @@ async def main():
     try:
         await js.subscribe(
             subject, 
-            queue_group,        # Client-side binding
-            config=conf,        # Server-side configuration (The Fix)
+            queue_group,
+            config=conf,
             cb=message_handler,
             manual_ack=True
         )
@@ -105,7 +131,6 @@ async def main():
         print(f"❌ CRITICAL ERROR subscribing: {e}")
         return
 
-    # Keep running
     while True:
         await asyncio.sleep(1)
 

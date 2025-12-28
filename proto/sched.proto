@@ -22,11 +22,13 @@ message Task {
   string id = 1;
   string intent_yaml = 2;
   TaskState state = 3;
-  GovernanceMode mode = 4;
-  int32 retry_count = 5;
-  repeated string logs = 6;
-  string ai_insight = 7;
-  bool is_simulation = 8; // <--- Add this
+  repeated string logs = 4;
+  GovernanceMode mode = 5;
+  bool is_simulation = 6;
+  int32 retry_count = 7;
+  string ai_insight = 8;
+  string pre_run_script = 9;   // Add this
+  string post_run_script = 10; // Add this
 }
 
 service SchedService {
@@ -34,6 +36,7 @@ service SchedService {
   rpc GetTask (TaskRequest) returns (TaskResponse);
   rpc ApproveTask (ApproveRequest) returns (ApproveResponse); // <--- Add this
   rpc RollbackTask (RollbackRequest) returns (RollbackResponse); // <--- Add this
+  rpc JoinCluster(JoinRequest) returns (JoinResponse);  // Add this
 }
 
 message ApproveRequest { string task_id = 1; } // <--- Add this
@@ -55,3 +58,11 @@ message SubmitRequest {
 message SubmitResponse { string task_id = 1; }
 message TaskRequest { string task_id = 1; }
 message TaskResponse { Task task = 1; }
+message JoinRequest {
+  string node_id = 1;
+  string address = 2;
+}
+message JoinResponse {
+  bool success = 1;
+  string message = 2;
+}
