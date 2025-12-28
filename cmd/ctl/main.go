@@ -35,6 +35,7 @@ func main() {
 
 	// Connect to Scheduler with mTLS if configured
 	var conn *grpc.ClientConn
+	var err error // Add this line
 	caFile := os.Getenv("SCHED_CA_FILE")
 
 	if caFile != "" {
@@ -91,13 +92,13 @@ func handleSubmit(client pb.SchedServiceClient, path string, dryRun bool) {
 		log.Fatalf("Failed to read file: %v", err)
 	}
 
-	// Add auth token to context
-	authToken := os.Getenv("SCHED_AUTH_TOKEN")
-	if authToken == "" {
-		authToken = "my-secret-key" // Default for development
+	// Require auth token from environment
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
 	}
 
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", authToken)
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
@@ -122,12 +123,12 @@ func handleSubmit(client pb.SchedServiceClient, path string, dryRun bool) {
 }
 
 func handleGet(client pb.SchedServiceClient, id string) {
-	authToken := os.Getenv("SCHED_AUTH_TOKEN")
-	if authToken == "" {
-		authToken = "my-secret-key"
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
 	}
 
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", authToken)
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
@@ -147,12 +148,12 @@ func handleGet(client pb.SchedServiceClient, id string) {
 }
 
 func handleApprove(client pb.SchedServiceClient, id string) {
-	authToken := os.Getenv("SCHED_AUTH_TOKEN")
-	if authToken == "" {
-		authToken = "my-secret-key"
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
 	}
 
-	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", authToken)
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 

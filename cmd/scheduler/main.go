@@ -43,9 +43,9 @@ func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServe
 	}
 	
 	tokens := md.Get("auth-token")
-	expectedToken := os.Getenv("SCHED_AUTH_TOKEN")
+	expectedToken := os.Getenv("ASTRA_AUTH_TOKEN")
 	if expectedToken == "" {
-		expectedToken = "my-secret-key" // Default for development
+		log.Fatal("SECURE ERROR: ASTRA_AUTH_TOKEN is not set!")
 	}
 	
 	if len(tokens) == 0 || tokens[0] != expectedToken {
@@ -221,112 +221,119 @@ func main() {
 
 	// B. Verdict Listener (AI Agent)
 	_, err = js.Subscribe("tasks.governance.verdict", func(m *nats.Msg) {
-		if !st.IsLeader() {
-			log.Printf("⚠️  Not leader, deferring verdict event")
-			return
-		}
-		
-		var v Verdict
-		if err := json.Unmarshal(m.Data, &v); err != nil {
-			log.Printf("ERR: Bad verdict JSON: %v", err)
-			m.Ack()
-			return
-		}
-		
-		log.Printf("🤖 AI VERDICT for %s: %s (%s)", v.TaskID, v.Decision, v.Reason)
+    if st.GetRaftState() != "Leader" {
+        return
+    }
 
-		task, err := st.Get(v.TaskID)
-		if err != nil {
-			log.Printf("❌ Task %s not found: %v", v.TaskID, err)
-			m.Ack()
-			return
-		}
+    var v Verdict
+    if err := json.Unmarshal(m.Data, &v); err != nil {
+        log.Printf("ERR: Failed to parse verdict: %v", err)
+        return
+    }
 
-		// SAFETY CHECK: If mode is HUMAN_GATE or ADVISORY_ONLY,
-		// we only record the AI's advice; we DO NOT change the state.
-		if task.Mode == pb.GovernanceMode_HUMAN_GATE || task.Mode == pb.GovernanceMode_ADVISORY_ONLY {
-			log.Printf("🤖 AI advice received for %s, but ignored due to %v mode.", v.TaskID, task.Mode)
-			task.AiInsight = fmt.Sprintf("AI Recommendation: %s - %s", v.Decision, v.Reason)
-			st.Set(task)
-			m.Ack()
-			return
-		}
+    log.Printf("📩 Received AI Verdict for Task %s: %s (Reason: %s)", v.TaskID, v.Decision, v.Reason)
 
-		// AUTONOMOUS MODE: Proceed with AI decision, but respect safety limits
-		if v.Decision == "RETRY" {
-			// SAFETY GATE: Check if we have already hit the retry limit
-			const maxRetries = 3
-			if task.RetryCount >= maxRetries {
-				log.Printf("⚠️ SAFETY LIMIT REACHED for %s (RetryCount: %d/%d). Ignoring AI retry request.", 
-					v.TaskID, task.RetryCount, maxRetries)
-				st.TransitionState(v.TaskID, pb.TaskState_FAILED)
-				m.Ack()
-				return
-			}
+    // Fetch the task to check governance mode
+    task, err := st.Get(v.TaskID)
+    if err != nil {
+        log.Printf("ERR: Failed to fetch task %s: %v", v.TaskID, err)
+        return
+    }
 
-			// Autonomous Retry - within safety limits
-			log.Printf("🤖 AI VERDICT: RETRY accepted for %s (Attempt %d/%d)", 
-				v.TaskID, task.RetryCount+1, maxRetries)
-			_, err := st.IncrementRetry(v.TaskID)
-			if err != nil {
-				log.Printf("ERR: Failed to increment retry: %v", err)
-				m.Ack()
-				return
-			}
-			js.Publish("tasks.scheduled", []byte(v.TaskID))
-			log.Printf("   -> Task re-queued automatically.")
-		} else {
-			st.TransitionState(v.TaskID, pb.TaskState_FAILED)
-			log.Printf("   -> Task HALTED to save costs.")
-		}
-		m.Ack()
-	}, nats.DeliverNew(), nats.StartTime(time.Now())) // ADD THIS
-	if err != nil {
-		log.Fatalf("Failed to subscribe to verdict events: %v", err)
-	}
+    // ADVISORY_ONLY Mode: Log AI verdict but don't act on it (failure handler will retry)
+    if task.Mode == pb.GovernanceMode_ADVISORY_ONLY {
+        log.Printf("ℹ️  [ADVISORY] AI suggests: %s (Reason: %s). Duly noted, but scheduler decides.", v.Decision, v.Reason)
+        // Don't retry here - the failure event handler already does that
+        m.Ack()
+        return
+    }
+
+    // For HUMAN_GATE and AUTONOMOUS modes, respect the AI verdict
+    if v.Decision == "STOP" {
+        log.Printf("🛑 AI verdict: STOP. Marking task %s as FAILED.", v.TaskID)
+        
+        task.State = pb.TaskState_FAILED
+        task.Logs = append(task.Logs, fmt.Sprintf("AI verdict: %s", v.Reason))
+        
+        if err := st.Set(task); err != nil {
+            log.Printf("ERR: Failed to update task %s: %v", v.TaskID, err)
+        }
+    } else if v.Decision == "RETRY" {
+        log.Printf("🔄 AI verdict: RETRY. Rescheduling task %s.", v.TaskID)
+        
+        if _, err := st.IncrementRetry(v.TaskID); err != nil {
+            log.Printf("ERR: Failed to increment retry for %s: %v", v.TaskID, err)
+            return
+        }
+        
+        if _, err := js.Publish("tasks.scheduled", []byte(v.TaskID)); err != nil {
+            log.Printf("ERR: Failed to republish task %s: %v", v.TaskID, err)
+        }
+    } else {
+        log.Printf("⚠️  Unknown AI decision: %s for task %s", v.Decision, v.TaskID)
+    }
+    m.Ack()
+}, nats.DeliverNew(), nats.StartTime(time.Now()))
+if err != nil {
+    log.Fatalf("Failed to subscribe to verdicts: %v", err)
+}
 
 	// C. Failure Events
 	_, err = js.Subscribe("tasks.events.failed", func(m *nats.Msg) {
-		if !st.IsLeader() {
-			log.Printf("⚠️  Not leader, deferring failure event")
-			return
-		}
-		
-		taskID := string(m.Data)
-		log.Printf("EVENT: Received FAILURE for %s", taskID)
+    if !st.IsLeader() {
+        log.Printf("⚠️  Not leader, deferring failure event")
+        return
+    }
+    
+    taskID := string(m.Data)
+    log.Printf("EVENT: Received FAILURE for %s", taskID)
 
-		task, err := st.Get(taskID)
-		if err != nil {
-			log.Printf("ERR: Failed to get task %s: %v", taskID, err)
-			m.Ack() // Ack to avoid infinite retry on missing task
-			return
-		}
+    task, err := st.Get(taskID)
+    if err != nil {
+        log.Printf("ERR: Failed to get task %s: %v", taskID, err)
+        m.Ack()
+        return
+    }
 
-		// LOGIC SWITCH
-		switch task.Mode {
-		case pb.GovernanceMode_ADVISORY_ONLY:
-			log.Printf("[ADVISORY] Task %s failed. Manual intervention required.", taskID)
-			// No automatic retry - just log and wait for manual action
-		case pb.GovernanceMode_AUTONOMOUS:
-			log.Printf("[AUTONOMOUS] Task %s failed. Moving to ANALYZING state...", taskID)
-			// Transition to ANALYZING - AI agent will handle the retry decision
-			if err := st.TransitionState(taskID, pb.TaskState_ANALYZING); err != nil {
-				log.Printf("ERR: Failed to update task %s to ANALYZING: %v", taskID, err)
-			}
-			// DO NOT publish to tasks.scheduled here - wait for AI verdict
-		case pb.GovernanceMode_HUMAN_GATE:
-			log.Printf("[HUMAN_GATE] Task %s failed. Awaiting approval...", taskID)
-			if err := st.TransitionState(taskID, pb.TaskState_NEEDS_APPROVAL); err != nil {
-				log.Printf("ERR: Failed to update task %s to NEEDS_APPROVAL: %v", taskID, err)
-			}
-		default:
-			log.Printf("ERR: Unknown governance mode for task %s", taskID)
-		}
-		m.Ack()
-	}, nats.DeliverNew(), nats.StartTime(time.Now())) // ADD THIS
-	if err != nil {
-		log.Fatalf("Failed to subscribe to failure events: %v", err)
-	}
+    // LOGIC SWITCH
+    switch task.Mode {
+    case pb.GovernanceMode_ADVISORY_ONLY:
+        // SAFETY CHECK: Only retry if we haven't hit the limit (e.g., 3)
+        if task.RetryCount < 3 {
+            log.Printf("[ADVISORY] Task %s failed (Attempt %d/3). Auto-retrying...", taskID, task.RetryCount+1)
+            
+            // 1. Increment the count in the Raft store
+            st.IncrementRetry(taskID)
+            
+            // 2. Publish to NATS
+            js.Publish("tasks.scheduled", []byte(taskID))
+            log.Printf("✅ [ADVISORY] Task %s rescheduled (Scheduler is the boss!)", taskID)
+        } else {
+            // STOP: We hit the limit.
+            log.Printf("🛑 [ADVISORY] Task %s reached MAX RETRIES. Halting.", taskID)
+            st.TransitionState(taskID, pb.TaskState_FAILED)
+        }
+        
+    case pb.GovernanceMode_AUTONOMOUS:
+        log.Printf("[AUTONOMOUS] Task %s failed. Moving to ANALYZING state...", taskID)
+        if err := st.TransitionState(taskID, pb.TaskState_ANALYZING); err != nil {
+            log.Printf("ERR: Failed to update task %s to ANALYZING: %v", taskID, err)
+        }
+        
+    case pb.GovernanceMode_HUMAN_GATE:
+        log.Printf("[HUMAN_GATE] Task %s failed. Awaiting approval...", taskID)
+        if err := st.TransitionState(taskID, pb.TaskState_NEEDS_APPROVAL); err != nil {
+            log.Printf("ERR: Failed to update task %s to NEEDS_APPROVAL: %v", taskID, err)
+        }
+        
+    default:
+        log.Printf("ERR: Unknown governance mode for task %s", taskID)
+    }
+    m.Ack()
+}, nats.DeliverNew(), nats.StartTime(time.Now()))
+if err != nil {
+    log.Fatalf("Failed to subscribe to failure events: %v", err)
+}
 
 	log.Println("✅ All NATS subscriptions active")
 

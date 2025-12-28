@@ -1,21 +1,42 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
-	"time"
+	"strings"
 
 	"github.com/nats-io/nats.go"
 	pb "github.com/venusai24/task-scheduler/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"gopkg.in/yaml.v2"
 )
 
 func main() {
-	// 1. Connect to NATS with Token Auth
+	// 1. Connect to gRPC Scheduler
+	conn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect to scheduler: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewSchedServiceClient(conn)
+
+	// Add auth token to context (optional for dev)
+	authToken := os.Getenv("ASTRA_AUTH_TOKEN")
+	if authToken != "" {
+		log.Println("Worker connected to Scheduler via gRPC with authentication")
+	} else {
+		log.Println("⚠️  Worker connected to Scheduler via gRPC without authentication (dev mode)")
+	}
+
+	// 2. Connect to NATS with Token Auth
 	natsToken := os.Getenv("NATS_TOKEN")
 	var nc *nats.Conn
-	var err error
 
 	if natsToken != "" {
 		nc, err = nats.Connect("nats://localhost:4222", nats.Token(natsToken))
@@ -36,7 +57,7 @@ func main() {
 	}
 	log.Println("Worker connected to NATS JetStream.")
 
-	// 2. Create the Stream
+	// 3. Create the Stream
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     "TASKS",
 		Subjects: []string{"tasks.>"},
@@ -45,14 +66,28 @@ func main() {
 		log.Printf("Stream might already exist: %v", err)
 	}
 
-	// 3. Subscribe
+	// 4. Subscribe
 	sub, err := js.QueueSubscribe("tasks.scheduled", "worker-group", func(m *nats.Msg) {
 		taskID := string(m.Data)
 		log.Printf("Received Task ID: %s", taskID)
 
-		// 4. EXECUTE (now with simulation support)
-		executeTask(taskID, js, nc)
+		// Create context with auth for each request
+		var reqCtx context.Context
+		if authToken != "" {
+			reqCtx = metadata.AppendToOutgoingContext(context.Background(), "auth-token", authToken)
+		} else {
+			reqCtx = context.Background()
+		}
 
+		// 1. Fetch the full task from the Scheduler via gRPC
+		resp, err := client.GetTask(reqCtx, &pb.TaskRequest{TaskId: taskID})
+		if err != nil {
+			log.Printf("ERR: Could not fetch task details for %s: %v", taskID, err)
+			return
+		}
+
+		// 2. Now you have the YAML in resp.Task.IntentYaml to execute!
+		executeTask(resp.Task, js)
 		m.Ack()
 
 	}, nats.Durable("worker-monitor"), nats.ManualAck())
@@ -72,54 +107,57 @@ func main() {
 	log.Println("Worker shutting down.")
 }
 
-func executeTask(id string, js nats.JetStreamContext, nc *nats.Conn) {
-	// Fetch task metadata to check simulation mode
-	// In production, retrieve from store via gRPC or KV
-	// For now, we'll use NATS KV or assume we can query
+// Fixed struct to match your YAML structure
+type Intent struct {
+	Spec struct {
+		Script     string `yaml:"script"`
+		Governance struct {
+			Mode string `yaml:"mode"`
+		} `yaml:"governance"`
+	} `yaml:"spec"`
+}
 
-	// SIMPLIFIED: Check for simulation flag via a separate KV or assume metadata
-	// Here we'll simulate by checking a config subject
-	msg, err := nc.Request("tasks.metadata."+id, nil, 1*time.Second)
-	var task pb.Task
-	isSimulation := false
+func executeTask(task *pb.Task, js nats.JetStreamContext) {
+	id := task.Id
 
-	if err == nil && len(msg.Data) > 0 {
-		if err := json.Unmarshal(msg.Data, &task); err == nil {
-			isSimulation = task.IsSimulation
-		}
-	}
-
-	if isSimulation {
+	// Check simulation mode
+	if task.IsSimulation {
 		log.Printf("🔍 SIMULATION MODE: Skipping execution for task %s", id)
-		log.Printf("   Intent validated. No actual work performed.")
-		// Mark as completed immediately
-		_, err := js.Publish("tasks.events.completed", []byte(id))
-		if err != nil {
-			log.Printf("Failed to publish completion: %v", err)
-		}
+		js.Publish("tasks.events.completed", []byte(id))
 		return
 	}
 
-	log.Printf(">>> STARTING Execution for %s", id)
-	time.Sleep(1 * time.Second)
-
-	// SIMULATED LOGIC: Succeed on retry, fail on first attempt
-	// In production, this would be replaced with actual task execution
-
-	// TODO: Get task from store to check RetryCount
-	// For now, we'll simulate: first attempt fails, retry succeeds
-
-	// FORCE FAILURE for first attempt (testing governance modes)
-	log.Printf("!!! SIMULATING FAILURE for %s", id)
-	_, err = js.Publish("tasks.events.failed", []byte(id))
-	if err != nil {
-		log.Printf("Failed to publish failure event: %v", err)
+	// Parse the YAML to extract the script
+	var intent Intent
+	if err := yaml.Unmarshal([]byte(task.IntentYaml), &intent); err != nil {
+		log.Printf("ERR: Failed to parse YAML: %v", err)
+		log.Printf("DEBUG: YAML content was: %s", task.IntentYaml)
+		js.Publish("tasks.events.failed", []byte(id))
+		return
 	}
 
-	// NOTE: To test retry success, you would check task.RetryCount:
-	// if task.RetryCount > 0 {
-	//     log.Printf("✅ Task %s SUCCEEDED on retry!", id)
-	//     js.Publish("tasks.events.completed", []byte(id))
-	//     return
-	// }
+	script := strings.TrimSpace(intent.Spec.Script)
+	if script == "" {
+		log.Printf("ERR: No script found for task %s", id)
+		log.Printf("DEBUG: Parsed intent: %+v", intent)
+		js.Publish("tasks.events.failed", []byte(id))
+		return
+	}
+
+	log.Printf(">>> EXECUTING: %s (Task: %s)", script, id)
+
+	// Execute the script
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+
+	if err != nil {
+		log.Printf("❌ Task %s FAILED: %v", id, err)
+		js.Publish("tasks.events.failed", []byte(id))
+	} else {
+		log.Printf("✅ Task %s COMPLETED", id)
+		js.Publish("tasks.events.completed", []byte(id))
+	}
 }

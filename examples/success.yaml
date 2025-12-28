@@ -1,0 +1,5 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  goal: "Say hello"
+  script: "echo 'hello world'; exit 0" # Exit 0 means "I succeeded!"

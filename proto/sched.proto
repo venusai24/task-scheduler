@@ -15,7 +15,7 @@ enum TaskState {
   COMPLETED = 3;
   FAILED = 4;
   ANALYZING = 5;
-  NEEDS_APPROVAL = 6; // <--- Add this
+  NEEDS_APPROVAL = 6;
 }
 
 message Task {
@@ -26,25 +26,37 @@ message Task {
   int32 retry_count = 5;
   repeated string logs = 6;
   string ai_insight = 7;
-  bool is_simulation = 8; // <--- Add this
+  bool is_simulation = 8;
+}
+
+message SubmitRequest {
+  string yaml_content = 1;
+  bool dry_run = 2;
+}
+
+message SubmitResponse {
+  string task_id = 1;
+}
+
+message TaskRequest {
+  string task_id = 1;
+}
+
+message TaskResponse {
+  Task task = 1;
+}
+
+message ApproveRequest {
+  string task_id = 1;
+}
+
+message ApproveResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 service SchedService {
   rpc SubmitIntent (SubmitRequest) returns (SubmitResponse);
   rpc GetTask (TaskRequest) returns (TaskResponse);
-  rpc ApproveTask (ApproveRequest) returns (ApproveResponse); // <--- Add this
+  rpc ApproveTask (ApproveRequest) returns (ApproveResponse);
 }
-
-message ApproveRequest { string task_id = 1; } // <--- Add this
-message ApproveResponse {                      // <--- Add this
-    bool success = 1;
-    string message = 2;
-}
-
-message SubmitRequest { 
-  string yaml_content = 1;
-  bool dry_run = 2; // <--- Add this
-}
-message SubmitResponse { string task_id = 1; }
-message TaskRequest { string task_id = 1; }
-message TaskResponse { Task task = 1; }
