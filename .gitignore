@@ -17,3 +17,4 @@ data/
 # Ignore node-specific bolt files (explicit if needed)
 data/**/raft-log.bolt
 data/**/raft-stable.bolt
+<MISSING_SECRET_CTR>

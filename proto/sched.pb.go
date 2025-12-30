@@ -73,13 +73,14 @@ func (GovernanceMode) EnumDescriptor() ([]byte, []int) {
 type TaskState int32
 
 const (
-	TaskState_CREATED        TaskState = 0
-	TaskState_PENDING        TaskState = 1
-	TaskState_RUNNING        TaskState = 2
-	TaskState_COMPLETED      TaskState = 3
-	TaskState_FAILED         TaskState = 4
-	TaskState_ANALYZING      TaskState = 5
-	TaskState_NEEDS_APPROVAL TaskState = 6 // <--- Add this
+	TaskState_CREATED               TaskState = 0
+	TaskState_PENDING               TaskState = 1
+	TaskState_RUNNING               TaskState = 2
+	TaskState_COMPLETED             TaskState = 3
+	TaskState_FAILED                TaskState = 4
+	TaskState_ANALYZING             TaskState = 5
+	TaskState_NEEDS_APPROVAL        TaskState = 6
+	TaskState_AWAITING_PREREQUISITE TaskState = 7 // <--- ADDED: Waiting for dependency
 )
 
 // Enum value maps for TaskState.
@@ -92,15 +93,17 @@ var (
 		4: "FAILED",
 		5: "ANALYZING",
 		6: "NEEDS_APPROVAL",
+		7: "AWAITING_PREREQUISITE",
 	}
 	TaskState_value = map[string]int32{
-		"CREATED":        0,
-		"PENDING":        1,
-		"RUNNING":        2,
-		"COMPLETED":      3,
-		"FAILED":         4,
-		"ANALYZING":      5,
-		"NEEDS_APPROVAL": 6,
+		"CREATED":               0,
+		"PENDING":               1,
+		"RUNNING":               2,
+		"COMPLETED":             3,
+		"FAILED":                4,
+		"ANALYZING":             5,
+		"NEEDS_APPROVAL":        6,
+		"AWAITING_PREREQUISITE": 7,
 	}
 )
 
@@ -143,6 +146,7 @@ type Task struct {
 	AiInsight     string                 `protobuf:"bytes,8,opt,name=ai_insight,json=aiInsight,proto3" json:"ai_insight,omitempty"`
 	PreRunScript  string                 `protobuf:"bytes,9,opt,name=pre_run_script,json=preRunScript,proto3" json:"pre_run_script,omitempty"`     // Add this
 	PostRunScript string                 `protobuf:"bytes,10,opt,name=post_run_script,json=postRunScript,proto3" json:"post_run_script,omitempty"` // Add this
+	DependsOn     string                 `protobuf:"bytes,11,opt,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`               // <--- ADDED: Parent Task ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -243,6 +247,13 @@ func (x *Task) GetPreRunScript() string {
 func (x *Task) GetPostRunScript() string {
 	if x != nil {
 		return x.PostRunScript
+	}
+	return ""
+}
+
+func (x *Task) GetDependsOn() string {
+	if x != nil {
+		return x.DependsOn
 	}
 	return ""
 }
@@ -731,7 +742,7 @@ var File_proto_sched_proto protoreflect.FileDescriptor
 
 const file_proto_sched_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/sched.proto\x12\x05sched\"\xd1\x02\n" +
+	"\x11proto/sched.proto\x12\x05sched\"\xf0\x02\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vintent_yaml\x18\x02 \x01(\tR\n" +
@@ -746,7 +757,9 @@ const file_proto_sched_proto_rawDesc = "" +
 	"ai_insight\x18\b \x01(\tR\taiInsight\x12$\n" +
 	"\x0epre_run_script\x18\t \x01(\tR\fpreRunScript\x12&\n" +
 	"\x0fpost_run_script\x18\n" +
-	" \x01(\tR\rpostRunScript\")\n" +
+	" \x01(\tR\rpostRunScript\x12\x1d\n" +
+	"\n" +
+	"depends_on\x18\v \x01(\tR\tdependsOn\")\n" +
 	"\x0eApproveRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\"E\n" +
 	"\x0fApproveResponse\x12\x18\n" +
@@ -777,7 +790,7 @@ const file_proto_sched_proto_rawDesc = "" +
 	"\n" +
 	"AUTONOMOUS\x10\x01\x12\x0e\n" +
 	"\n" +
-	"HUMAN_GATE\x10\x02*p\n" +
+	"HUMAN_GATE\x10\x02*\x8b\x01\n" +
 	"\tTaskState\x12\v\n" +
 	"\aCREATED\x10\x00\x12\v\n" +
 	"\aPENDING\x10\x01\x12\v\n" +
@@ -786,7 +799,8 @@ const file_proto_sched_proto_rawDesc = "" +
 	"\n" +
 	"\x06FAILED\x10\x04\x12\r\n" +
 	"\tANALYZING\x10\x05\x12\x12\n" +
-	"\x0eNEEDS_APPROVAL\x10\x062\xb6\x02\n" +
+	"\x0eNEEDS_APPROVAL\x10\x06\x12\x19\n" +
+	"\x15AWAITING_PREREQUISITE\x10\a2\xb6\x02\n" +
 	"\fSchedService\x12;\n" +
 	"\fSubmitIntent\x12\x14.sched.SubmitRequest\x1a\x15.sched.SubmitResponse\x122\n" +
 	"\aGetTask\x12\x12.sched.TaskRequest\x1a\x13.sched.TaskResponse\x12<\n" +

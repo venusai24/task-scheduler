@@ -175,6 +175,20 @@ func (s *Store) Get(id string) (*pb.Task, error) {
 	return t, nil
 }
 
+// GetDependentTasks returns all tasks waiting for the given parent ID
+func (s *Store) GetDependentTasks(parentID string) []*pb.Task {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var dependents []*pb.Task
+	for _, task := range s.tasks {
+		if task.DependsOn == parentID && task.State == pb.TaskState_AWAITING_PREREQUISITE {
+			dependents = append(dependents, task)
+		}
+	}
+	return dependents
+}
+
 func (s *Store) IncrementRetry(id string) (int32, error) {
 	if s.raft.State() != raft.Leader {
 		return 0, fmt.Errorf("not leader")

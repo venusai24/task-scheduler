@@ -1,0 +1,16 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  # Fails on attempt 1 and 2. Succeeds on 3.
+  script: |
+    if [ ! -f /tmp/ctr ]; then echo 0 > /tmp/ctr; fi
+    val=$(cat /tmp/ctr)
+    val=$((val + 1))
+    echo $val > /tmp/ctr
+    if [ "$val" -lt 3 ]; then
+      echo "Attempt $val failed"
+      exit 1
+    fi
+    echo "Attempt $val succeeded"
+  governance:
+    mode: "AUTONOMOUS" # AI will govern this

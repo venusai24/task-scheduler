@@ -15,7 +15,8 @@ enum TaskState {
   COMPLETED = 3;
   FAILED = 4;
   ANALYZING = 5;
-  NEEDS_APPROVAL = 6; // <--- Add this
+  NEEDS_APPROVAL = 6;
+  AWAITING_PREREQUISITE = 7; // <--- ADDED: Waiting for dependency
 }
 
 message Task {
@@ -29,6 +30,7 @@ message Task {
   string ai_insight = 8;
   string pre_run_script = 9;   // Add this
   string post_run_script = 10; // Add this
+  string depends_on = 11; // <--- ADDED: Parent Task ID
 }
 
 service SchedService {

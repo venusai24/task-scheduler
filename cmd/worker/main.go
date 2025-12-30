@@ -21,6 +21,20 @@ import (
 	pb "github.com/venusai24/task-scheduler/proto"
 )
 
+// Global variables to manage connection state
+var (
+	conn   *grpc.ClientConn
+	client pb.SchedServiceClient
+	creds  credentials.TransportCredentials
+)
+
+// List of all potential scheduler nodes
+var schedulerAddrs = []string{
+	"localhost:50051",
+	"localhost:50052",
+	"localhost:50053",
+}
+
 func main() {
 	// 1. Connect to NATS with Token Auth
 	natsToken := os.Getenv("NATS_TOKEN")
@@ -36,17 +50,17 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("NATS Connection failed: ", err)
 	}
 	defer nc.Close()
 
 	js, err := nc.JetStream()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("JetStream init failed: ", err)
 	}
-	log.Println("Worker connected to NATS JetStream.")
+	log.Println("✅ Worker connected to NATS JetStream.")
 
-	// 2. Connect to Scheduler gRPC with MANDATORY mTLS
+	// 2. Load mTLS Credentials ONE TIME
 	certFile := os.Getenv("WORKER_CERT_FILE")
 	keyFile := os.Getenv("WORKER_KEY_FILE")
 	caFile := os.Getenv("SCHED_CA_FILE")
@@ -70,45 +84,21 @@ func main() {
 		log.Fatal("Failed to append CA cert")
 	}
 
-	creds := credentials.NewTLS(&tls.Config{
+	creds = credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{clientCert},
 		RootCAs:      certPool,
 		ServerName:   "localhost",
 	})
 
-	// ✅ ADD: Try multiple scheduler nodes until we find the leader
-	schedulerAddrs := []string{
-		"localhost:50051",
-		"localhost:50052", 
-		"localhost:50053",
-	}
-
-	var conn *grpc.ClientConn
-	var connErr error
-
-	for _, addr := range schedulerAddrs {
-		log.Printf("Attempting to connect to scheduler at %s...", addr)
-		conn, connErr = grpc.Dial(addr, 
-			grpc.WithTransportCredentials(creds),
-			grpc.WithBlock(),
-			grpc.WithTimeout(2*time.Second),
-		)
-		if connErr == nil {
-			log.Printf("✅ Connected to scheduler at %s", addr)
-			break
+	// 3. Initial Connection to Scheduler
+	connectToScheduler()
+	defer func() {
+		if conn != nil {
+			conn.Close()
 		}
-		log.Printf("⚠️  Failed to connect to %s: %v", addr, connErr)
-	}
+	}()
 
-	if connErr != nil {
-		log.Fatal("Failed to connect to any scheduler node")
-	}
-	defer conn.Close()
-
-	client := pb.NewSchedServiceClient(conn)
-	log.Println("Worker connected to Scheduler gRPC.")
-
-	// 3. Create the Stream
+	// 4. Create the Stream
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     "TASKS",
 		Subjects: []string{"tasks.>"},
@@ -117,43 +107,41 @@ func main() {
 		log.Printf("Stream might already exist: %v", err)
 	}
 
-	// 4. Subscribe
+	// 5. Subscribe to Tasks
 	sub, err := js.QueueSubscribe("tasks.scheduled", "worker-group", func(m *nats.Msg) {
 		taskID := string(m.Data)
-		log.Printf("Worker received task ID: %s", taskID)
+		log.Printf("📥 Worker received task ID: %s", taskID)
 
-		// FETCH: Use gRPC to get full task details with Auth Token
-		token := os.Getenv("ASTRA_AUTH_TOKEN")
-		if token == "" {
-			token = "my-secret-key" // Matches Scheduler default
-		}
-
-		ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-
-		var resp *pb.TaskResponse
+		// RETRY LOOP: Resilience against Leader Failover
+		var task *pb.Task
 		var fetchErr error
-		for attempt := 1; attempt <= 5; attempt++ {
-			resp, fetchErr = client.GetTask(ctx, &pb.TaskRequest{TaskId: taskID})
+
+		for attempt := 1; attempt <= 10; attempt++ {
+			task, fetchErr = fetchTask(taskID)
 			if fetchErr == nil {
 				break
 			}
-			if strings.Contains(strings.ToLower(fetchErr.Error()), "task not found") {
-				log.Printf("Task %s not found yet (attempt %d/5), retrying...", taskID, attempt)
-				time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
-				continue
+
+			log.Printf("⚠️  Fetch attempt %d/10 failed: %v", attempt, fetchErr)
+
+			// If connection refused/closed, force reconnection
+			if strings.Contains(fetchErr.Error(), "connection refused") ||
+				strings.Contains(fetchErr.Error(), "transport is closing") ||
+				strings.Contains(fetchErr.Error(), "unavailable") {
+				log.Println("🔄 Detected dead connection. Hunting for new Leader...")
+				connectToScheduler()
 			}
-			break
+
+			time.Sleep(1 * time.Second)
 		}
+
 		if fetchErr != nil {
-			log.Printf("Failed to fetch task details: %v", fetchErr)
-			m.Ack()
+			log.Printf("❌ ABORT: Could not fetch task %s after retries", taskID)
+			m.Ack() // Ack to clear it from NATS
 			return
 		}
 
-		// EXECUTE with full task object
-		executeTask(resp.Task, js)
+		executeTask(task, js)
 		m.Ack()
 
 	}, nats.Durable("worker-monitor"), nats.ManualAck())
@@ -162,7 +150,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Println("Worker listening for tasks... (Ctrl+C to quit)")
+	log.Println("🚀 Worker running. Waiting for tasks... (Ctrl+C to quit)")
 
 	// Keep running until interrupt
 	c := make(chan os.Signal, 1)
@@ -171,6 +159,55 @@ func main() {
 
 	sub.Unsubscribe()
 	log.Println("Worker shutting down.")
+}
+
+// connectToScheduler cycles through nodes until it finds a live one
+func connectToScheduler() {
+	// Close existing if open
+	if conn != nil {
+		conn.Close()
+	}
+
+	for _, addr := range schedulerAddrs {
+		log.Printf("Trying to connect to Scheduler at %s...", addr)
+		var err error
+		// Short timeout for failover speed
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, err = grpc.DialContext(ctx, addr,
+			grpc.WithTransportCredentials(creds),
+			grpc.WithBlock(),
+		)
+		cancel()
+
+		if err == nil {
+			client = pb.NewSchedServiceClient(conn)
+			log.Printf("✅ Connected to Scheduler Node: %s", addr)
+			return
+		}
+		log.Printf("⚠️  Failed to connect to %s: %v", addr, err)
+	}
+	log.Println("❌ CRITICAL: All Scheduler nodes appear down!")
+}
+
+// fetchTask wraps the gRPC call
+func fetchTask(id string) (*pb.Task, error) {
+	if client == nil {
+		return nil, fmt.Errorf("no scheduler connection")
+	}
+
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		token = "my-secret-key"
+	}
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	resp, err := client.GetTask(ctx, &pb.TaskRequest{TaskId: id})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Task, nil
 }
 
 func executeTask(task *pb.Task, js nats.JetStreamContext) {
@@ -193,7 +230,6 @@ func executeTask(task *pb.Task, js nats.JetStreamContext) {
 
 	// Quality Gate: Check for pre-run conditions
 	if strings.Contains(task.IntentYaml, "check_file:") {
-		// Extract filename (simplified parsing)
 		if strings.Contains(task.IntentYaml, "check_file: required_file.txt") {
 			if _, err := os.Stat("required_file.txt"); os.IsNotExist(err) {
 				log.Printf("❌ Quality Gate Failed: required_file.txt missing for task %s", task.Id)
@@ -222,7 +258,7 @@ func executeTask(task *pb.Task, js nats.JetStreamContext) {
 
 	// ACTUAL EXECUTION
 	log.Printf("Executing secure script for task %s", task.Id)
-	
+
 	var out bytes.Buffer
 	cmd := exec.Command("sh", "-c", processedScript)
 	cmd.Stdout = &out
@@ -230,7 +266,7 @@ func executeTask(task *pb.Task, js nats.JetStreamContext) {
 
 	if err := cmd.Run(); err != nil {
 		log.Printf("!!! Execution FAILED for %s: %v", task.Id, err)
-		
+
 		// Create a JSON failure payload with error context
 		failurePayload := map[string]string{
 			"task_id": task.Id,
@@ -259,38 +295,71 @@ func executeTask(task *pb.Task, js nats.JetStreamContext) {
 func extractScript(yamlStr string) string {
 	lines := strings.Split(yamlStr, "\n")
 	foundScript := false
+	scriptIndentLevel := -1
 	var scriptLines []string
 
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "script:") {
-			foundScript = true
-			// Handle inline script: "script: echo hello"
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) == 2 && strings.TrimSpace(parts[1]) != "|" && strings.TrimSpace(parts[1]) != "" {
-				return strings.TrimSpace(parts[1])
-			}
-			continue
-		}
-		// If we found the script header and it's indented, it's part of the multi-line block
-		if foundScript {
-			if strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t") || trimmed == "" {
-				scriptLines = append(scriptLines, trimmed)
-			} else if trimmed != "" {
-				// We hit another field, stop collecting
+		// Keep the raw line to preserve indentation
+		rawLine := line
+		trimmed := strings.TrimSpace(rawLine)
+
+		// Calculate indentation level
+		currentIndent := 0
+		for _, char := range rawLine {
+			if char == ' ' {
+				currentIndent++
+			} else if char == '\t' {
+				currentIndent += 4
+			} else {
 				break
 			}
 		}
+
+		if !foundScript {
+			if strings.HasPrefix(trimmed, "script:") {
+				foundScript = true
+				scriptIndentLevel = currentIndent
+
+				parts := strings.SplitN(trimmed, ":", 2)
+				if len(parts) == 2 {
+					val := strings.TrimSpace(parts[1])
+					// Handle inline script
+					if val != "|" && val != ">" && val != "" {
+						if len(val) >= 2 {
+							first, last := val[0], val[len(val)-1]
+							if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+								return val[1 : len(val)-1]
+							}
+						}
+						return val
+					}
+				}
+			}
+			continue
+		}
+
+		if foundScript {
+			if trimmed == "" {
+				scriptLines = append(scriptLines, rawLine)
+				continue
+			}
+			// Stop if we hit a sibling key (same or less indentation than 'script:')
+			if currentIndent <= scriptIndentLevel {
+				break
+			}
+			scriptLines = append(scriptLines, rawLine)
+		}
 	}
-	return strings.TrimSpace(strings.Join(scriptLines, "\n"))
+	return strings.Join(scriptLines, "\n")
 }
 
 func injectSecrets(script string) string {
 	return os.Expand(script, func(key string) string {
 		val := os.Getenv(key)
 		if val == "" {
-			log.Printf("⚠️  Warning: Secret %s not found in environment", key)
-			return fmt.Sprintf("<MISSING_SECRET_%s>", key)
+			// If not found in env, assume it's a local script variable.
+			// Return it with the $ prefix to preserve it.
+			return "$" + key
 		}
 		return val
 	})

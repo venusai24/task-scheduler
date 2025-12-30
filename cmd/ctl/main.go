@@ -24,6 +24,7 @@ func main() {
 	submitCmd := flag.NewFlagSet("submit", flag.ExitOnError)
 	filePtr := submitCmd.String("f", "", "Path to YAML intent file")
 	dryRun := submitCmd.Bool("dry-run", false, "Verify intent without execution")
+	dependsOnPtr := submitCmd.String("depends-on", "", "ID of the parent task to wait for")
 
 	getCmd := flag.NewFlagSet("get", flag.ExitOnError)
 	idPtr := getCmd.String("id", "", "Task ID to fetch")
@@ -144,7 +145,7 @@ func main() {
 			return
 		}
 		err := withClient(func(c pb.SchedServiceClient) error {
-			return handleSubmit(c, *filePtr, *dryRun)
+			return handleSubmit(c, *filePtr, *dependsOnPtr, *dryRun)
 		})
 		if err != nil {
 			log.Fatalf("Submission failed: %v", err)
@@ -203,13 +204,37 @@ func main() {
 	}
 }
 
-func handleSubmit(client pb.SchedServiceClient, path string, dryRun bool) error {
+func handleSubmit(client pb.SchedServiceClient, path string, dependsOn string, dryRun bool) error {
 	if path == "" {
 		return fmt.Errorf("path to YAML intent file is required (-f)")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
+	}
+
+	yamlContent := string(data)
+
+	// Replace existing depends_on line if it exists, or append if not found
+	if dependsOn != "" {
+		lines := strings.Split(yamlContent, "\n")
+		var newLines []string
+		found := false
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "depends_on:") {
+				// Overwrite the line with the flag value
+				newLines = append(newLines, fmt.Sprintf("depends_on: %s", dependsOn))
+				found = true
+			} else {
+				newLines = append(newLines, line)
+			}
+		}
+		if !found {
+			// Append if not found
+			newLines = append(newLines, fmt.Sprintf("depends_on: %s", dependsOn))
+		}
+		yamlContent = strings.Join(newLines, "\n")
 	}
 
 	token := os.Getenv("ASTRA_AUTH_TOKEN")
@@ -221,10 +246,13 @@ func handleSubmit(client pb.SchedServiceClient, path string, dryRun bool) error 
 	ctx = metadata.AppendToOutgoingContext(ctx, "auth-token", token)
 
 	fmt.Println("🚀 Submitting Intent to AstraSched Control Plane...")
-	_, err = client.SubmitIntent(ctx, &pb.SubmitRequest{
-		YamlContent: string(data),
-		DryRun:     dryRun,
+	resp, err := client.SubmitIntent(ctx, &pb.SubmitRequest{
+		YamlContent: yamlContent,
+		DryRun:      dryRun,
 	})
+	if err == nil {
+		fmt.Printf("✅ Success! Task ID: %s\n", resp.TaskId)
+	}
 	return err
 }
 
@@ -351,9 +379,9 @@ func handleExplain(client pb.SchedServiceClient, id string) error {
 func printHelp() {
 	fmt.Println("AstraSched CLI (astractl)")
 	fmt.Println("Usage:")
-	fmt.Println("  astractl submit -f <file.yaml> [--dry-run]  # Submit a new task")
-	fmt.Println("  astractl get -id <task_id>                  # Check task status")
-	fmt.Println("  astractl approve -id <task_id>              # Approve a pending task")
-	fmt.Println("  astractl rollback -id <task_id>             # Rollback task to initial state")
-	fmt.Println("  astractl explain -id <task_id>              # Show Root Cause Analysis report")
+	fmt.Println("  astractl submit -f <file.yaml> [--depends-on <ID>] [--dry-run]  # Submit a new task")
+	fmt.Println("  astractl get -id <task_id>                                     # Check task status")
+	fmt.Println("  astractl approve -id <task_id>                                 # Approve a pending task")
+	fmt.Println("  astractl rollback -id <task_id>                                # Rollback task to initial state")
+	fmt.Println("  astractl explain -id <task_id>                                 # Show Root Cause Analysis report")
 }

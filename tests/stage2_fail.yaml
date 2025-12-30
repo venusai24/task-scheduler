@@ -1,0 +1,6 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  script: "echo 'I am going to fail!'; exit 1"
+  governance:
+    mode: "ADVISORY_ONLY" # No AI retry, just fail immediately

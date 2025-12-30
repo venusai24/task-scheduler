@@ -1,0 +1,6 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  script: "echo 'I am the prerequisite (Task A)'; sleep 2"
+  governance:
+    mode: "ADVISORY_ONLY"

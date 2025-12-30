@@ -62,47 +62,68 @@ func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServe
 func (s *server) SubmitIntent(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitResponse, error) {
 	taskID := nuid.Next()
 
-	// Improved detection logic - handle both quoted and unquoted YAML values
 	mode := pb.GovernanceMode_ADVISORY_ONLY
-
 	if strings.Contains(req.YamlContent, "mode: \"HUMAN_GATE\"") || strings.Contains(req.YamlContent, "mode: HUMAN_GATE") {
 		mode = pb.GovernanceMode_HUMAN_GATE
 		log.Printf("Detected HUMAN_GATE mode for task %s", taskID)
 	} else if strings.Contains(req.YamlContent, "mode: \"AUTONOMOUS\"") || strings.Contains(req.YamlContent, "mode: AUTONOMOUS") {
 		mode = pb.GovernanceMode_AUTONOMOUS
 		log.Printf("Detected AUTONOMOUS mode for task %s", taskID)
-	} else {
-		log.Printf("Using default ADVISORY_ONLY mode for task %s", taskID)
+	}
+
+	// Extract dependency
+	dependsOn := extractField(req.YamlContent, "depends_on:")
+	
+	initialState := pb.TaskState_CREATED
+	shouldScheduleNow := true
+
+	if dependsOn != "" {
+		// Check if the parent is ALREADY completed
+		parentTask, err := s.store.Get(dependsOn)
+		if err == nil && parentTask.State == pb.TaskState_COMPLETED {
+			log.Printf("🔗 Parent %s is ALREADY finished. Scheduling %s immediately.", dependsOn, taskID)
+			initialState = pb.TaskState_CREATED
+			shouldScheduleNow = true
+		} else {
+			initialState = pb.TaskState_AWAITING_PREREQUISITE
+			shouldScheduleNow = false
+			log.Printf("🔗 Task %s waiting for parent: %s", taskID, dependsOn)
+		}
 	}
 
 	task := &pb.Task{
 		Id:            taskID,
 		IntentYaml:    req.YamlContent,
-		State:         pb.TaskState_CREATED,
+		State:         initialState,
 		Logs:          []string{},
 		Mode:          mode,
 		IsSimulation:  req.DryRun,
 		PreRunScript:  extractField(req.YamlContent, "pre_run:"),
 		PostRunScript: extractField(req.YamlContent, "post_run:"),
+		DependsOn:     dependsOn,
 	}
 
 	if req.DryRun {
 		log.Printf("🔍 SIMULATION MODE: Task %s will not execute actual work", taskID)
 	}
 
-	log.Printf("Received Intent. Assigning ID: %s. Applying to Raft...", taskID)
 	if err := s.store.Set(task); err != nil {
 		return nil, fmt.Errorf("failed to persist task: %v", err)
 	}
 
-	msg := []byte(task.Id)
-	_, err := s.js.Publish("tasks.scheduled", msg)
-	if err != nil {
-		log.Printf("ERR: Failed to publish task %s to NATS: %v", task.Id, err)
-		return nil, fmt.Errorf("failed to schedule task: %v", err)
+	// Schedule if no dependency OR dependency is already met
+	if shouldScheduleNow {
+		msg := []byte(task.Id)
+		_, err := s.js.Publish("tasks.scheduled", msg)
+		if err != nil {
+			log.Printf("ERR: Failed to publish task %s to NATS: %v", task.Id, err)
+			return nil, fmt.Errorf("failed to schedule task: %v", err)
+		}
+		log.Printf("Task %s scheduled via NATS!", task.Id)
+	} else {
+		log.Printf("Task %s persisted but HELD (waiting for %s)", task.Id, dependsOn)
 	}
 
-	log.Printf("Task %s scheduled via NATS!", task.Id)
 	return &pb.SubmitResponse{TaskId: taskID}, nil
 }
 
@@ -117,34 +138,26 @@ func (s *server) GetTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResp
 // Add the ApproveTask handler to the gRPC server implementation:
 func (s *server) ApproveTask(ctx context.Context, req *pb.ApproveRequest) (*pb.ApproveResponse, error) {
 	if req.TaskId == "" {
-		return &pb.ApproveResponse{
-			Success: false,
-			Message: "task_id is required",
-		}, nil
+		return &pb.ApproveResponse{Success: false, Message: "task_id is required"}, nil
 	}
-
-	// Increment retry count
 	if _, err := s.store.IncrementRetry(req.TaskId); err != nil {
-		return &pb.ApproveResponse{
-			Success: false,
-			Message: fmt.Sprintf("Failed to increment retry: %v", err),
-		}, nil
+		return &pb.ApproveResponse{Success: false, Message: fmt.Sprintf("Failed: %v", err)}, nil
 	}
-
-	// FIX: Publish only the task ID string (not the marshaled protobuf)
-	// The worker expects: taskID := string(m.Data)
 	if _, err := s.js.Publish("tasks.scheduled", []byte(req.TaskId)); err != nil {
-		return &pb.ApproveResponse{
-			Success: false,
-			Message: fmt.Sprintf("Failed to republish task: %v", err),
-		}, nil
+		return &pb.ApproveResponse{Success: false, Message: fmt.Sprintf("Failed to republish: %v", err)}, nil
 	}
-
 	log.Printf("Task %s approved and republished", req.TaskId)
-	return &pb.ApproveResponse{
-		Success: true,
-		Message: "Task approved and rescheduled",
-	}, nil
+	return &pb.ApproveResponse{Success: true, Message: "Task approved"}, nil
+}
+
+func (s *server) RollbackTask(ctx context.Context, req *pb.RollbackRequest) (*pb.RollbackResponse, error) {
+	if req.TaskId == "" {
+		return &pb.RollbackResponse{Success: false, Message: "task_id is required"}, nil
+	}
+	if err := s.store.Rollback(req.TaskId); err != nil {
+		return &pb.RollbackResponse{Success: false, Message: fmt.Sprintf("Rollback failed: %v", err)}, nil
+	}
+	return &pb.RollbackResponse{Success: true, Message: "Rolled back successfully"}, nil
 }
 
 func (s *server) JoinCluster(ctx context.Context, req *pb.JoinRequest) (*pb.JoinResponse, error) {
@@ -363,17 +376,37 @@ func main() {
 	// 6. NOW Safe to Subscribe to NATS Events
 	log.Println("Subscribing to NATS event streams...")
 
-	// A. Completed Events
+	// A. Completed Events - NOW WITH DEPENDENCY COORDINATION
 	_, err = js.Subscribe("tasks.events.completed", func(m *nats.Msg) {
-		// Readiness gate: Only process if we're still the leader
 		if !st.IsLeader() {
 			log.Printf("⚠️  Not leader, deferring completion event")
-			return // NATS will redeliver
+			return
 		}
 
 		taskID := string(m.Data)
 		log.Printf("EVENT: Received Completion for %s", taskID)
 		st.TransitionState(taskID, pb.TaskState_COMPLETED)
+
+		// 🚀 TRIGGER DEPENDENTS
+		dependents := st.GetDependentTasks(taskID)
+		if len(dependents) > 0 {
+			log.Printf("🔗 Found %d dependent tasks waiting for %s", len(dependents), taskID)
+			for _, dep := range dependents {
+				log.Printf("   -> Unleashing Dependent Task: %s", dep.Id)
+				
+				// 1. Update State in Raft
+				if err := st.TransitionState(dep.Id, pb.TaskState_PENDING); err != nil {
+					log.Printf("ERR: Failed to transition dependent task %s: %v", dep.Id, err)
+					continue
+				}
+
+				// 2. Publish to NATS for execution
+				if _, err := js.Publish("tasks.scheduled", []byte(dep.Id)); err != nil {
+					log.Printf("ERR: Failed to publish dependent task %s: %v", dep.Id, err)
+				}
+			}
+		}
+
 		m.Ack()
 	}, nats.DeliverNew())
 	if err != nil {

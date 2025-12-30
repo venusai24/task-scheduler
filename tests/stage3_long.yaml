@@ -1,0 +1,6 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  script: "echo 'Long task started...'; sleep 20; echo 'Long task done'"
+  governance:
+    mode: "ADVISORY_ONLY"

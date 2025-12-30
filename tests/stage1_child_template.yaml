@@ -1,0 +1,7 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  script: "echo 'I am the dependent (Task B). I waited!'; exit 0"
+  depends_on: "PLACEHOLDER_ID"
+  governance:
+    mode: "ADVISORY_ONLY"

@@ -1,0 +1,21 @@
+apiVersion: astra/v1
+kind: Intent
+spec:
+  script: |
+    CTR="/tmp/astra_test_ctr"
+    # Initialize counter if missing
+    if [ ! -f "$CTR" ]; then echo "0" > "$CTR"; fi
+    
+    # Read and Increment
+    CUR=$(cat "$CTR")
+    NEW=$(expr "$CUR" + 1)
+    echo "$NEW" > "$CTR"
+    
+    # Fail attempts 1 and 2 with a fake Network Error
+    if [ "$NEW" -lt 3 ]; then
+       echo "Error: Connection timed out to database (Attempt $NEW)"
+       exit 1
+    fi
+    echo "Success: Connection established on Attempt $NEW"
+  governance:
+    mode: "AUTONOMOUS"
