@@ -24,6 +24,7 @@ const (
 	SchedService_ApproveTask_FullMethodName  = "/sched.SchedService/ApproveTask"
 	SchedService_RollbackTask_FullMethodName = "/sched.SchedService/RollbackTask"
 	SchedService_JoinCluster_FullMethodName  = "/sched.SchedService/JoinCluster"
+	SchedService_LeaveCluster_FullMethodName = "/sched.SchedService/LeaveCluster"
 )
 
 // SchedServiceClient is the client API for SchedService service.
@@ -35,6 +36,7 @@ type SchedServiceClient interface {
 	ApproveTask(ctx context.Context, in *ApproveRequest, opts ...grpc.CallOption) (*ApproveResponse, error)
 	RollbackTask(ctx context.Context, in *RollbackRequest, opts ...grpc.CallOption) (*RollbackResponse, error)
 	JoinCluster(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error)
+	LeaveCluster(ctx context.Context, in *LeaveRequest, opts ...grpc.CallOption) (*LeaveResponse, error)
 }
 
 type schedServiceClient struct {
@@ -95,6 +97,16 @@ func (c *schedServiceClient) JoinCluster(ctx context.Context, in *JoinRequest, o
 	return out, nil
 }
 
+func (c *schedServiceClient) LeaveCluster(ctx context.Context, in *LeaveRequest, opts ...grpc.CallOption) (*LeaveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LeaveResponse)
+	err := c.cc.Invoke(ctx, SchedService_LeaveCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SchedServiceServer is the server API for SchedService service.
 // All implementations must embed UnimplementedSchedServiceServer
 // for forward compatibility.
@@ -104,6 +116,7 @@ type SchedServiceServer interface {
 	ApproveTask(context.Context, *ApproveRequest) (*ApproveResponse, error)
 	RollbackTask(context.Context, *RollbackRequest) (*RollbackResponse, error)
 	JoinCluster(context.Context, *JoinRequest) (*JoinResponse, error)
+	LeaveCluster(context.Context, *LeaveRequest) (*LeaveResponse, error)
 	mustEmbedUnimplementedSchedServiceServer()
 }
 
@@ -128,6 +141,9 @@ func (UnimplementedSchedServiceServer) RollbackTask(context.Context, *RollbackRe
 }
 func (UnimplementedSchedServiceServer) JoinCluster(context.Context, *JoinRequest) (*JoinResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method JoinCluster not implemented")
+}
+func (UnimplementedSchedServiceServer) LeaveCluster(context.Context, *LeaveRequest) (*LeaveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LeaveCluster not implemented")
 }
 func (UnimplementedSchedServiceServer) mustEmbedUnimplementedSchedServiceServer() {}
 func (UnimplementedSchedServiceServer) testEmbeddedByValue()                      {}
@@ -240,6 +256,24 @@ func _SchedService_JoinCluster_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SchedService_LeaveCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LeaveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SchedServiceServer).LeaveCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SchedService_LeaveCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SchedServiceServer).LeaveCluster(ctx, req.(*LeaveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SchedService_ServiceDesc is the grpc.ServiceDesc for SchedService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -266,6 +300,10 @@ var SchedService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "JoinCluster",
 			Handler:    _SchedService_JoinCluster_Handler,
+		},
+		{
+			MethodName: "LeaveCluster",
+			Handler:    _SchedService_LeaveCluster_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

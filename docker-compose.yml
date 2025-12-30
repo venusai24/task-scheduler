@@ -1,15 +1,83 @@
 version: '3.8'
+
 services:
-  # The Nervous System
+  # --- 1. The Nervous System (NATS) ---
   nats:
     image: nats:latest
+    # Added --auth to protect the cluster
+    command: "-js --auth my-nats-token -m 8222" 
     ports:
-      - "4222:4222" # Client port
-      - "8222:8222" # Dashboard
-    command: "-js" # Enable JetStream (Persisted queues)
+      - "4222:4222" # Client Port
+      - "8222:8222" # Dashboard Port
+    networks:
+      - astra-net
 
-  # Optional: A UI to see NATS messages
+  # Optional: CLI Tools container (useful for debugging)
   nats-box:
     image: natsio/nats-box
-    depends_on: [nats]
+    depends_on:
+      - nats
     command: sleep infinity
+    environment:
+      - NATS_URL=nats://my-nats-token@nats:4222
+    networks:
+      - astra-net
+
+  # --- 2. Control Plane (Raft Cluster Leader) ---
+  node-1:
+    image: astrasched:latest
+    build: .
+    # Starts as the Bootstrap Leader
+    command: ["scheduler", "--id", "node-1", "--raft", "0.0.0.0:6000", "--bootstrap", "true"]
+    environment:
+      - ASTRA_AUTH_TOKEN=my-secret-key
+      - NATS_TOKEN=my-nats-token
+      - SCHED_CA_FILE=/app/certs/ca.crt
+      - SCHED_CERT_FILE=/app/certs/server.crt
+      - SCHED_KEY_FILE=/app/certs/server.key
+    volumes:
+      - ./data/node-1:/app/data/node-1
+      - ./certs:/app/certs
+    ports:
+      - "50051:50051" # Expose gRPC to host
+    depends_on:
+      - nats
+    networks:
+      - astra-net
+
+  # --- 3. Execution Plane (The Worker) ---
+  worker:
+    image: astrasched:latest
+    build: .
+    command: ["worker"]
+    environment:
+      - ASTRA_AUTH_TOKEN=my-secret-key
+      - NATS_TOKEN=my-nats-token
+      - SCHED_CA_FILE=/app/certs/ca.crt
+      - WORKER_CERT_FILE=/app/certs/worker.crt
+      - WORKER_KEY_FILE=/app/certs/worker.key
+    volumes:
+      - ./certs:/app/certs
+    depends_on:
+      - node-1
+    networks:
+      - astra-net
+
+  # --- 4. Intelligence Plane (AI Agent) ---
+  ai-agent:
+    image: astrasched:latest
+    build: .
+    entrypoint: ["python", "reasoning/agent/agent.py"]
+    environment:
+      - NATS_TOKEN=my-nats-token
+      # Pass API keys from your host machine
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - nats
+    networks:
+      - astra-net
+
+networks:
+  astra-net:
+    name: astra-cluster-net

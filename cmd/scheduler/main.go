@@ -180,6 +180,24 @@ func (s *server) JoinCluster(ctx context.Context, req *pb.JoinRequest) (*pb.Join
 	return &pb.JoinResponse{Success: true, Message: "node added"}, nil
 }
 
+func (s *server) LeaveCluster(ctx context.Context, req *pb.LeaveRequest) (*pb.LeaveResponse, error) {
+	if req.NodeId == "" {
+		return &pb.LeaveResponse{Success: false, Message: "node_id required"}, nil
+	}
+
+	if !s.store.IsLeader() {
+		return &pb.LeaveResponse{Success: false, Message: "not leader"}, nil
+	}
+
+	log.Printf("Received request to remove node: %s", req.NodeId)
+	if err := s.store.RemoveServer(req.NodeId); err != nil {
+		return &pb.LeaveResponse{Success: false, Message: fmt.Sprintf("failed to remove: %v", err)}, nil
+	}
+
+	log.Printf("Successfully removed node %s from cluster", req.NodeId)
+	return &pb.LeaveResponse{Success: true, Message: "node removed"}, nil
+}
+
 func main() {
 	// ADD CLI FLAGS
 	nodeID := flag.String("id", "node-1", "Node identifier")

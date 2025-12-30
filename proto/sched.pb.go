@@ -738,6 +738,102 @@ func (x *JoinResponse) GetMessage() string {
 	return ""
 }
 
+type LeaveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeaveRequest) Reset() {
+	*x = LeaveRequest{}
+	mi := &file_proto_sched_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeaveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeaveRequest) ProtoMessage() {}
+
+func (x *LeaveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_sched_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeaveRequest.ProtoReflect.Descriptor instead.
+func (*LeaveRequest) Descriptor() ([]byte, []int) {
+	return file_proto_sched_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *LeaveRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+type LeaveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LeaveResponse) Reset() {
+	*x = LeaveResponse{}
+	mi := &file_proto_sched_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LeaveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LeaveResponse) ProtoMessage() {}
+
+func (x *LeaveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_sched_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LeaveResponse.ProtoReflect.Descriptor instead.
+func (*LeaveResponse) Descriptor() ([]byte, []int) {
+	return file_proto_sched_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *LeaveResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *LeaveResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_proto_sched_proto protoreflect.FileDescriptor
 
 const file_proto_sched_proto_rawDesc = "" +
@@ -784,6 +880,11 @@ const file_proto_sched_proto_rawDesc = "" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\"B\n" +
 	"\fJoinResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"'\n" +
+	"\fLeaveRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"C\n" +
+	"\rLeaveResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage*C\n" +
 	"\x0eGovernanceMode\x12\x11\n" +
 	"\rADVISORY_ONLY\x10\x00\x12\x0e\n" +
@@ -800,13 +901,14 @@ const file_proto_sched_proto_rawDesc = "" +
 	"\x06FAILED\x10\x04\x12\r\n" +
 	"\tANALYZING\x10\x05\x12\x12\n" +
 	"\x0eNEEDS_APPROVAL\x10\x06\x12\x19\n" +
-	"\x15AWAITING_PREREQUISITE\x10\a2\xb6\x02\n" +
+	"\x15AWAITING_PREREQUISITE\x10\a2\xf1\x02\n" +
 	"\fSchedService\x12;\n" +
 	"\fSubmitIntent\x12\x14.sched.SubmitRequest\x1a\x15.sched.SubmitResponse\x122\n" +
 	"\aGetTask\x12\x12.sched.TaskRequest\x1a\x13.sched.TaskResponse\x12<\n" +
 	"\vApproveTask\x12\x15.sched.ApproveRequest\x1a\x16.sched.ApproveResponse\x12?\n" +
 	"\fRollbackTask\x12\x16.sched.RollbackRequest\x1a\x17.sched.RollbackResponse\x126\n" +
-	"\vJoinCluster\x12\x12.sched.JoinRequest\x1a\x13.sched.JoinResponseB+Z)github.com/venusai24/task-scheduler/protob\x06proto3"
+	"\vJoinCluster\x12\x12.sched.JoinRequest\x1a\x13.sched.JoinResponse\x129\n" +
+	"\fLeaveCluster\x12\x13.sched.LeaveRequest\x1a\x14.sched.LeaveResponseB+Z)github.com/venusai24/task-scheduler/protob\x06proto3"
 
 var (
 	file_proto_sched_proto_rawDescOnce sync.Once
@@ -821,7 +923,7 @@ func file_proto_sched_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_sched_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proto_sched_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_proto_sched_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_proto_sched_proto_goTypes = []any{
 	(GovernanceMode)(0),      // 0: sched.GovernanceMode
 	(TaskState)(0),           // 1: sched.TaskState
@@ -836,6 +938,8 @@ var file_proto_sched_proto_goTypes = []any{
 	(*TaskResponse)(nil),     // 10: sched.TaskResponse
 	(*JoinRequest)(nil),      // 11: sched.JoinRequest
 	(*JoinResponse)(nil),     // 12: sched.JoinResponse
+	(*LeaveRequest)(nil),     // 13: sched.LeaveRequest
+	(*LeaveResponse)(nil),    // 14: sched.LeaveResponse
 }
 var file_proto_sched_proto_depIdxs = []int32{
 	1,  // 0: sched.Task.state:type_name -> sched.TaskState
@@ -846,13 +950,15 @@ var file_proto_sched_proto_depIdxs = []int32{
 	3,  // 5: sched.SchedService.ApproveTask:input_type -> sched.ApproveRequest
 	5,  // 6: sched.SchedService.RollbackTask:input_type -> sched.RollbackRequest
 	11, // 7: sched.SchedService.JoinCluster:input_type -> sched.JoinRequest
-	8,  // 8: sched.SchedService.SubmitIntent:output_type -> sched.SubmitResponse
-	10, // 9: sched.SchedService.GetTask:output_type -> sched.TaskResponse
-	4,  // 10: sched.SchedService.ApproveTask:output_type -> sched.ApproveResponse
-	6,  // 11: sched.SchedService.RollbackTask:output_type -> sched.RollbackResponse
-	12, // 12: sched.SchedService.JoinCluster:output_type -> sched.JoinResponse
-	8,  // [8:13] is the sub-list for method output_type
-	3,  // [3:8] is the sub-list for method input_type
+	13, // 8: sched.SchedService.LeaveCluster:input_type -> sched.LeaveRequest
+	8,  // 9: sched.SchedService.SubmitIntent:output_type -> sched.SubmitResponse
+	10, // 10: sched.SchedService.GetTask:output_type -> sched.TaskResponse
+	4,  // 11: sched.SchedService.ApproveTask:output_type -> sched.ApproveResponse
+	6,  // 12: sched.SchedService.RollbackTask:output_type -> sched.RollbackResponse
+	12, // 13: sched.SchedService.JoinCluster:output_type -> sched.JoinResponse
+	14, // 14: sched.SchedService.LeaveCluster:output_type -> sched.LeaveResponse
+	9,  // [9:15] is the sub-list for method output_type
+	3,  // [3:9] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -869,7 +975,7 @@ func file_proto_sched_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_sched_proto_rawDesc), len(file_proto_sched_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

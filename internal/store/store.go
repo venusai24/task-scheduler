@@ -273,3 +273,16 @@ func (s *Store) GetRaftState() string {
 func (s *Store) IsLeader() bool {
 	return s.raft.State() == raft.Leader
 }
+
+// RemoveServer removes a node from the Raft cluster
+func (s *Store) RemoveServer(nodeID string) error {
+	if s.raft.State() != raft.Leader {
+		return fmt.Errorf("not leader")
+	}
+
+	future := s.raft.RemoveServer(raft.ServerID(nodeID), 0, 0)
+	if err := future.Error(); err != nil {
+		return err
+	}
+	return nil
+}

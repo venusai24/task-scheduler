@@ -38,6 +38,9 @@ func main() {
 	explainCmd := flag.NewFlagSet("explain", flag.ExitOnError)
 	explainIDPtr := explainCmd.String("id", "", "Task ID to explain")
 
+	leaveCmd := flag.NewFlagSet("leave", flag.ExitOnError)
+	leaveNodePtr := leaveCmd.String("node", "", "Node ID to remove from cluster")
+
 	if len(os.Args) < 2 {
 		printHelp()
 		os.Exit(1)
@@ -197,6 +200,18 @@ func main() {
 		})
 		if err != nil {
 			log.Fatalf("Failed to fetch task details: %v", err)
+		}
+	case "leave":
+		leaveCmd.Parse(os.Args[2:])
+		if *leaveNodePtr == "" {
+			fmt.Println("Error: Please provide a node ID using -node <node_id>")
+			return
+		}
+		err := withClient(func(c pb.SchedServiceClient) error {
+			return handleLeave(c, *leaveNodePtr)
+		})
+		if err != nil {
+			log.Fatalf("Failed to remove node: %v", err)
 		}
 	default:
 		printHelp()
@@ -376,6 +391,30 @@ func handleExplain(client pb.SchedServiceClient, id string) error {
 	return nil
 }
 
+func handleLeave(client pb.SchedServiceClient, nodeID string) error {
+	token := os.Getenv("ASTRA_AUTH_TOKEN")
+	if token == "" {
+		return fmt.Errorf("ASTRA_AUTH_TOKEN is not set")
+	}
+
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "auth-token", token)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	fmt.Printf("🔻 Removing node %s from cluster...\n", nodeID)
+	resp, err := client.LeaveCluster(ctx, &pb.LeaveRequest{NodeId: nodeID})
+	if err != nil {
+		return err
+	}
+
+	if resp.Success {
+		fmt.Printf("✅ Node %s removed successfully\n", nodeID)
+	} else {
+		return fmt.Errorf("Node removal failed: %s", resp.Message)
+	}
+	return nil
+}
+
 func printHelp() {
 	fmt.Println("AstraSched CLI (astractl)")
 	fmt.Println("Usage:")
@@ -384,4 +423,5 @@ func printHelp() {
 	fmt.Println("  astractl approve -id <task_id>                                 # Approve a pending task")
 	fmt.Println("  astractl rollback -id <task_id>                                # Rollback task to initial state")
 	fmt.Println("  astractl explain -id <task_id>                                 # Show Root Cause Analysis report")
+	fmt.Println("  astractl leave -node <node_id>                                 # Remove node from cluster")
 }
