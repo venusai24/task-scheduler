@@ -16,6 +16,7 @@ enum TaskState {
   FAILED = 4;
   ANALYZING = 5;
   NEEDS_APPROVAL = 6;
+  AWAITING_PREREQUISITE = 7;
 }
 
 message Task {
@@ -27,6 +28,7 @@ message Task {
   repeated string logs = 6;
   string ai_insight = 7;
   bool is_simulation = 8;
+  string depends_on = 9;
 }
 
 message SubmitRequest {

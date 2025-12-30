@@ -211,3 +211,18 @@ func (s *Store) GetRaftState() string {
 func (s *Store) IsLeader() bool {
 	return s.GetRaftState() == "Leader"
 }
+
+// GetDependentTasks finds all tasks waiting for the given parentID
+// This is a thread-safe read operation.
+func (s *Store) GetDependentTasks(parentID string) []*pb.Task {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var dependents []*pb.Task
+	for _, task := range s.tasks {
+		if task.DependsOn == parentID && task.State == pb.TaskState_AWAITING_PREREQUISITE {
+			dependents = append(dependents, task)
+		}
+	}
+	return dependents
+}

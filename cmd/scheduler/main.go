@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"gopkg.in/yaml.v2"
 
 	"github.com/venusai24/task-scheduler/internal/store"
 	pb "github.com/venusai24/task-scheduler/proto"
@@ -27,6 +28,13 @@ type Verdict struct {
 	TaskID   string `json:"task_id"`
 	Decision string `json:"decision"` // "RETRY" or "STOP"
 	Reason   string `json:"reason"`
+}
+
+// Helper struct to parse just the dependency field
+type IntentSpec struct {
+	Spec struct {
+		DependsOn string `yaml:"depends_on"`
+	} `yaml:"spec"`
 }
 
 type server struct {
@@ -58,6 +66,13 @@ func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServe
 func (s *server) SubmitIntent(ctx context.Context, req *pb.SubmitRequest) (*pb.SubmitResponse, error) {
 	taskID := nuid.Next()
 
+	// [NEW] Parse YAML to check for dependencies
+	var intent IntentSpec
+	if err := yaml.Unmarshal([]byte(req.YamlContent), &intent); err != nil {
+		log.Printf("⚠️ Warning: Failed to parse YAML for dependency check: %v", err)
+	}
+	dependsOn := strings.TrimSpace(intent.Spec.DependsOn)
+
 	// Improved detection logic - handle both quoted and unquoted YAML values
 	mode := pb.GovernanceMode_ADVISORY_ONLY
 	
@@ -71,13 +86,21 @@ func (s *server) SubmitIntent(ctx context.Context, req *pb.SubmitRequest) (*pb.S
 		log.Printf("Using default ADVISORY_ONLY mode for task %s", taskID)
 	}
 
+	// Determine Initial State
+	initialState := pb.TaskState_CREATED
+	if dependsOn != "" {
+		initialState = pb.TaskState_AWAITING_PREREQUISITE
+		log.Printf("🔗 Task %s is chained! Waiting for parent task: %s", taskID, dependsOn)
+	}
+
 	task := &pb.Task{
 		Id:           taskID,
 		IntentYaml:   req.YamlContent,
-		State:        pb.TaskState_CREATED,
+		State:        initialState,
 		Logs:         []string{},
 		Mode:         mode,
-		IsSimulation: req.DryRun, // <--- Add this
+		IsSimulation: req.DryRun,
+		DependsOn:    dependsOn,
 	}
 
 	if req.DryRun {
@@ -89,14 +112,19 @@ func (s *server) SubmitIntent(ctx context.Context, req *pb.SubmitRequest) (*pb.S
 		return nil, fmt.Errorf("failed to persist task: %v", err)
 	}
 
-	msg := []byte(task.Id)
-	_, err := s.js.Publish("tasks.scheduled", msg)
-	if err != nil {
-		log.Printf("ERR: Failed to publish task %s to NATS: %v", task.Id, err)
-		return nil, fmt.Errorf("failed to schedule task: %v", err)
+	// [NEW] Only publish to NATS if NOT waiting for a dependency
+	if task.State != pb.TaskState_AWAITING_PREREQUISITE {
+		msg := []byte(task.Id)
+		_, err := s.js.Publish("tasks.scheduled", msg)
+		if err != nil {
+			log.Printf("ERR: Failed to publish task %s to NATS: %v", task.Id, err)
+			return nil, fmt.Errorf("failed to schedule task: %v", err)
+		}
+		log.Printf("Task %s scheduled via NATS!", task.Id)
+	} else {
+		log.Printf("⏳ Task %s saved to store. Holding execution until %s completes.", task.Id, dependsOn)
 	}
 
-	log.Printf("Task %s scheduled via NATS!", task.Id)
 	return &pb.SubmitResponse{TaskId: taskID}, nil
 }
 
@@ -212,9 +240,34 @@ func main() {
 		
 		taskID := string(m.Data)
 		log.Printf("EVENT: Received Completion for %s", taskID)
-		st.TransitionState(taskID, pb.TaskState_COMPLETED)
+		
+		// 1. Mark the current task as COMPLETED
+		if err := st.TransitionState(taskID, pb.TaskState_COMPLETED); err != nil {
+			log.Printf("ERR: Failed to transition %s to completed: %v", taskID, err)
+			return
+		}
+
+		// [NEW] 2. Check for Chain Reactions (Airflow-style)
+		dependents := st.GetDependentTasks(taskID)
+		for _, dep := range dependents {
+			log.Printf("🚀 CHAIN REACTION: Triggering dependent task %s (Parent %s finished)", dep.Id, taskID)
+			
+			// A. Update State in Raft (AWAITING -> PENDING)
+			if err := st.TransitionState(dep.Id, pb.TaskState_PENDING); err != nil {
+				log.Printf("ERR: Failed to activate dependent task %s: %v", dep.Id, err)
+				continue
+			}
+
+			// B. Publish to NATS for Workers
+			if _, err := js.Publish("tasks.scheduled", []byte(dep.Id)); err != nil {
+				log.Printf("ERR: Failed to publish dependent task %s: %v", dep.Id, err)
+			} else {
+				log.Printf("✅ Dependent task %s dispatched to workers.", dep.Id)
+			}
+		}
+
 		m.Ack()
-	}, nats.DeliverNew(), nats.StartTime(time.Now())) // ADD THIS
+	}, nats.DeliverNew(), nats.StartTime(time.Now()))
 	if err != nil {
 		log.Fatalf("Failed to subscribe to completed events: %v", err)
 	}
