@@ -12,6 +12,7 @@ import (
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	pb "github.com/venusai24/task-scheduler/proto"
 	"go.etcd.io/bbolt"
+	"google.golang.org/protobuf/proto"
 )
 
 // Store holds the actual data and the Raft instance
@@ -157,9 +158,9 @@ func (s *Store) TransitionState(id string, newState pb.TaskState, logMsg string)
 		return fmt.Errorf("task %s not found", id)
 	}
 
-	updatedTask := *task
+	updatedTask := proto.Clone(task).(*pb.Task)
 	updatedTask.State = newState
-	b, err := json.Marshal(&updatedTask)
+	b, err := json.Marshal(updatedTask)
 	if err != nil {
 		return err
 	}
@@ -203,13 +204,13 @@ func (s *Store) IncrementRetry(id string) (int32, error) {
 		return 0, fmt.Errorf("task not found")
 	}
 
-	updatedTask := *task
+	updatedTask := proto.Clone(task).(*pb.Task)
 	updatedTask.RetryCount++
 	updatedTask.State = pb.TaskState_PENDING
 
 	s.logStorage.AppendLog(id, fmt.Sprintf("Retry #%d triggered", updatedTask.RetryCount))
 
-	b, err := json.Marshal(&updatedTask)
+	b, err := json.Marshal(updatedTask)
 	if err != nil {
 		return 0, err
 	}
@@ -230,14 +231,14 @@ func (s *Store) Rollback(id string) error {
 		return fmt.Errorf("task %s not found", id)
 	}
 
-	updated := *task
+	updated := proto.Clone(task).(*pb.Task)
 	updated.State = pb.TaskState_CREATED
 	updated.RetryCount = 0
 	updated.AiInsight = ""
 
 	s.logStorage.AppendLog(id, "⏪ Task Rolled Back to Initial State")
 
-	b, err := json.Marshal(&updated)
+	b, err := json.Marshal(updated)
 	if err != nil {
 		return err
 	}

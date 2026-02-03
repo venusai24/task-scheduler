@@ -44,7 +44,10 @@ func setupTestServer() (*server, *store.Store, *MockExecutor) {
 	// might need disk access. We'll use a temp dir.
 	tmpDir := "/tmp/scheduler_test_" + fmt.Sprintf("%d", time.Now().UnixNano())
 
-	st := store.NewStore(tmpDir)
+	// Fix: create a LogStorage instance
+	logStore := store.NewFileLogStore(tmpDir)
+
+	st := store.NewStore(logStore)
 	// Open with bootstrap=true to be leader
 	_ = st.Open("test-node", tmpDir, "localhost:0", true)
 	// Wait for leader
