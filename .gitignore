@@ -72,3 +72,10 @@ bin/worker
 bin/scheduler
 go.mod
 go.sum
+reasoning/agent/__pycache__/agent.cpython-312.pyc
+reasoning/tests/__pycache__/test_agent.cpython-312.pyc
+reasoning/__init__.py
+.gitignore
+reasoning/__pycache__/__init__.cpython-312.pyc
+reasoning/tests/__pycache__/__init__.cpython-312.pyc
+reasoning/tests/__pycache__/test_agent_integration.cpython-312.pyc
