@@ -271,6 +271,9 @@ func handleGet(client pb.SchedServiceClient, id string) error {
 		return err
 	}
 
+	// NEW: Fetch Logs via separate RPC
+	logResp, logErr := client.GetTaskLogs(ctx, &pb.LogRequest{TaskId: id})
+
 	t := resp.Task
 	fmt.Println("\n AstraSched Task Report")
 	fmt.Println("========================")
@@ -281,11 +284,16 @@ func handleGet(client pb.SchedServiceClient, id string) error {
 	if t.AiInsight != "" {
 		fmt.Printf("AI Insight:  %s\n", t.AiInsight)
 	}
-	if len(t.Logs) > 0 {
-		fmt.Println("\nExecution Logs:")
-		for _, logEntry := range t.Logs {
+
+	fmt.Println("\nExecution Logs (Offloaded):")
+	if logErr == nil && len(logResp.Logs) > 0 {
+		for _, logEntry := range logResp.Logs {
 			fmt.Printf("  • %s\n", logEntry)
 		}
+	} else if logErr != nil {
+		fmt.Printf("  (Logs unavailable: %v)\n", logErr)
+	} else {
+		fmt.Println("  (No logs recorded)")
 	}
 	fmt.Println("========================")
 	return nil
@@ -366,9 +374,12 @@ func handleExplain(client pb.SchedServiceClient, id string) error {
 		fmt.Println("\n🤖 AI Semantic Analysis: No AI verdict recorded for this task.")
 	}
 
-	if len(t.Logs) > 0 {
+	// Fetch Logs for Audit Trail
+	logResp, logErr := client.GetTaskLogs(ctx, &pb.LogRequest{TaskId: id})
+
+	if logErr == nil && len(logResp.Logs) > 0 {
 		fmt.Println("\n📈 Execution Journey (Audit Log):")
-		for _, entry := range t.Logs {
+		for _, entry := range logResp.Logs {
 			fmt.Printf("  • %s\n", entry)
 		}
 	}

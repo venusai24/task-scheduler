@@ -9,31 +9,35 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	pb "github.com/venusai24/task-scheduler/proto"
-	"go.etcd.io/bbolt"                // ← Add this
-	raftboltdb "github.com/hashicorp/raft-boltdb/v2" // ← Add this
+	"go.etcd.io/bbolt"
 )
 
 // Store holds the actual data and the Raft instance
 type Store struct {
-	mu           sync.RWMutex
-	db           *bbolt.DB
-	raft         *raft.Raft
-	logStore     *raftboltdb.BoltStore
-	stableStore  *raftboltdb.BoltStore
-	transport    *raft.NetworkTransport // ← ADD THIS
-	localID      raft.ServerID          // <- NEW: keep the configured local ID
-	tasks        map[string]*pb.Task    // The "State" we are protecting
+	mu          sync.RWMutex
+	db          *bbolt.DB
+	raft        *raft.Raft
+	logStore    *raftboltdb.BoltStore
+	stableStore *raftboltdb.BoltStore
+	transport   *raft.NetworkTransport
+	localID     raft.ServerID
+	tasks       map[string]*pb.Task
 
-	// lifecycle for background goroutines
+	// Separate store for heavy logs
+	logStorage LogStorage
+
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 }
 
 // NewStore initializes the memory map
-func NewStore() *Store {
+// NewStore initializes the memory map
+func NewStore(logStorage LogStorage) *Store {
 	return &Store{
-		tasks: make(map[string]*pb.Task),
+		tasks:      make(map[string]*pb.Task),
+		logStorage: logStorage,
 	}
 }
 
@@ -44,32 +48,40 @@ func (s *Store) SetRaft(r *raft.Raft) {
 	s.raft = r
 }
 
-// -- RAFT FSM IMPLEMENTATION --
+// Open initializes the Raft node
+// Note: This replaces the Open in raft.go if they share package,
+// but Go doesn't allow duplicate method declarations across files in same package if not careful.
+// Wait, methods are attached to types. Splitting methods across files is fine.
+// BUT `Open` was in `raft.go`. If I redefine it here, it works ONLY if I remove it from `raft.go` or if `raft.go` is deleted.
+// The user confirmed `raft.go` is part of the package. I should NOT redefine `Open` here if it's already in `raft.go`.
+// Let me CHECK `raft.go` content again. `Open` IS in `raft.go`.
+// So I should NOT include `Open` and `Close` and `startFailureDetector` in this file if they are in `raft.go`.
+// I will REMOVE them from this file `store.go` and let `raft.go` handle the Raft lifecycle.
+// I only need to ensure `Store` struct fields match what `raft.go` expects.
+
+// Re-checking `raft.go` view...
+// `raft.go` uses `s.transport`, `s.localID`, `s.shutdownCtx`.
+// My new `Store` struct definition includes these.
+// So I should NOT paste `Open`, `Close`, `startFailureDetector`, `AddVoter`, `RemoveServer` here.
+// I will stick to the FSM and Data access methods.
 
 // Apply is called by Raft when a log is committed.
 func (s *Store) Apply(l *raft.Log) interface{} {
 	var task pb.Task
-
-	// We assume the log data is just the JSON of the Task
 	if err := json.Unmarshal(l.Data, &task); err != nil {
-		// Return error but don't panic - Raft will handle it
 		return fmt.Errorf("failed to unmarshal task: %w", err)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Apply the change to the local state
 	s.tasks[task.Id] = &task
 	return nil
 }
 
-// Snapshot is used to compact logs
+// Snapshot ...
 func (s *Store) Snapshot() (raft.FSMSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	// Clone the map
 	clone := make(map[string]*pb.Task)
 	for k, v := range s.tasks {
 		clone[k] = v
@@ -77,23 +89,18 @@ func (s *Store) Snapshot() (raft.FSMSnapshot, error) {
 	return &fsmSnapshot{store: clone}, nil
 }
 
-// Restore loads the state from a snapshot
+// Restore ...
 func (s *Store) Restore(rc io.ReadCloser) error {
-	defer rc.Close() // Ensure the reader is always closed
-
+	defer rc.Close()
 	o := make(map[string]*pb.Task)
 	if err := json.NewDecoder(rc).Decode(&o); err != nil {
 		return fmt.Errorf("failed to decode snapshot: %w", err)
 	}
-
 	s.mu.Lock()
 	s.tasks = o
 	s.mu.Unlock()
-
 	return nil
 }
-
-// -- SNAPSHOT HELPER --
 
 type fsmSnapshot struct {
 	store map[string]*pb.Task
@@ -120,25 +127,26 @@ func (f *fsmSnapshot) Release() {}
 
 // -- PUBLIC API --
 
-// Set adds a task to the distributed store
 func (s *Store) Set(t *pb.Task) error {
 	if s.raft.State() != raft.Leader {
 		return fmt.Errorf("not leader")
 	}
-
 	b, err := json.Marshal(t)
 	if err != nil {
 		return err
 	}
-
-	f := s.raft.Apply(b, 10*time.Second)
-	return f.Error()
+	return s.raft.Apply(b, 10*time.Second).Error()
 }
 
-// TransitionState updates just the state of a task
-func (s *Store) TransitionState(id string, newState pb.TaskState) error {
+func (s *Store) TransitionState(id string, newState pb.TaskState, logMsg string) error {
 	if s.raft.State() != raft.Leader {
 		return fmt.Errorf("not leader")
+	}
+
+	if logMsg != "" {
+		if err := s.logStorage.AppendLog(id, logMsg); err != nil {
+			fmt.Printf("ERR: Failed to write log for %s: %v\n", id, err)
+		}
 	}
 
 	s.mu.RLock()
@@ -151,11 +159,6 @@ func (s *Store) TransitionState(id string, newState pb.TaskState) error {
 
 	updatedTask := *task
 	updatedTask.State = newState
-
-	timestamp := time.Now().Format(time.RFC3339)
-	logEntry := fmt.Sprintf("[%s] State transitioned to %s", timestamp, newState)
-	updatedTask.Logs = append(updatedTask.Logs, logEntry)
-
 	b, err := json.Marshal(&updatedTask)
 	if err != nil {
 		return err
@@ -163,11 +166,9 @@ func (s *Store) TransitionState(id string, newState pb.TaskState) error {
 	return s.raft.Apply(b, 10*time.Second).Error()
 }
 
-// Get reads a task (local read)
 func (s *Store) Get(id string) (*pb.Task, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	t, ok := s.tasks[id]
 	if !ok {
 		return nil, fmt.Errorf("task not found")
@@ -175,11 +176,13 @@ func (s *Store) Get(id string) (*pb.Task, error) {
 	return t, nil
 }
 
-// GetDependentTasks returns all tasks waiting for the given parent ID
+func (s *Store) GetLogs(id string) ([]string, error) {
+	return s.logStorage.GetLogs(id)
+}
+
 func (s *Store) GetDependentTasks(parentID string) []*pb.Task {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	var dependents []*pb.Task
 	for _, task := range s.tasks {
 		if task.DependsOn == parentID && task.State == pb.TaskState_AWAITING_PREREQUISITE {
@@ -193,83 +196,67 @@ func (s *Store) IncrementRetry(id string) (int32, error) {
 	if s.raft.State() != raft.Leader {
 		return 0, fmt.Errorf("not leader")
 	}
-
 	s.mu.RLock()
 	task, exists := s.tasks[id]
 	s.mu.RUnlock()
-
 	if !exists {
 		return 0, fmt.Errorf("task not found")
 	}
 
-	// Clone and Update
 	updatedTask := *task
 	updatedTask.RetryCount++
-	updatedTask.State = pb.TaskState_PENDING // Reset to pending so it can be picked up
+	updatedTask.State = pb.TaskState_PENDING
 
-	// Append log to history for debugging
-	updatedTask.Logs = append(updatedTask.Logs, fmt.Sprintf("Retry #%d triggered at %s", updatedTask.RetryCount, time.Now().Format(time.RFC3339)))
+	s.logStorage.AppendLog(id, fmt.Sprintf("Retry #%d triggered", updatedTask.RetryCount))
 
 	b, err := json.Marshal(&updatedTask)
 	if err != nil {
 		return 0, err
 	}
-
 	if err := s.raft.Apply(b, 10*time.Second).Error(); err != nil {
 		return 0, err
 	}
-
 	return updatedTask.RetryCount, nil
 }
 
-// Rollback resets a task to its initial state
 func (s *Store) Rollback(id string) error {
 	if s.raft.State() != raft.Leader {
 		return fmt.Errorf("not leader")
 	}
-
 	s.mu.RLock()
 	task, exists := s.tasks[id]
 	s.mu.RUnlock()
-
 	if !exists {
 		return fmt.Errorf("task %s not found", id)
 	}
 
-	// Clone and reset to initial state
 	updated := *task
 	updated.State = pb.TaskState_CREATED
 	updated.RetryCount = 0
-	updated.Logs = append(updated.Logs, fmt.Sprintf("⏪ Task Rolled Back to Initial State at %s", time.Now().Format(time.RFC3339)))
-
-	// Clear AI insight on rollback
 	updated.AiInsight = ""
+
+	s.logStorage.AppendLog(id, "⏪ Task Rolled Back to Initial State")
 
 	b, err := json.Marshal(&updated)
 	if err != nil {
 		return err
 	}
-
 	return s.raft.Apply(b, 10*time.Second).Error()
 }
 
-// GetLeaderAddr returns the address of the current leader (empty if no leader)
 func (s *Store) GetLeaderAddr() string {
 	return string(s.raft.Leader())
 }
 
-// GetRaftState returns the current Raft state (Follower, Candidate, Leader, Shutdown)
 func (s *Store) GetRaftState() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	if s.raft == nil {
 		return "Shutdown"
 	}
 	return s.raft.State().String()
 }
 
-// IsLeader returns true if this node is the Raft leader
 func (s *Store) IsLeader() bool {
 	return s.raft.State() == raft.Leader
 }

@@ -23,7 +23,7 @@ message Task {
   string id = 1;
   string intent_yaml = 2;
   TaskState state = 3;
-  repeated string logs = 4;
+  // logs moved to separate storage
   GovernanceMode mode = 5;
   bool is_simulation = 6;
   int32 retry_count = 7;
@@ -31,15 +31,20 @@ message Task {
   string pre_run_script = 9;   // Add this
   string post_run_script = 10; // Add this
   string depends_on = 11; // <--- ADDED: Parent Task ID
+  string assigned_node = 12; // <--- ADDED: Targeted Node ID
 }
 
 service SchedService {
   rpc SubmitIntent (SubmitRequest) returns (SubmitResponse);
   rpc GetTask (TaskRequest) returns (TaskResponse);
+  rpc GetTaskLogs (LogRequest) returns (LogResponse); // <--- Add this
   rpc ApproveTask (ApproveRequest) returns (ApproveResponse); // <--- Add this
   rpc RollbackTask (RollbackRequest) returns (RollbackResponse); // <--- Add this
   rpc JoinCluster(JoinRequest) returns (JoinResponse);  // Add this
 }
+
+message LogRequest { string task_id = 1; }
+message LogResponse { repeated string logs = 1; }
 
 message ApproveRequest { string task_id = 1; } // <--- Add this
 message ApproveResponse {                      // <--- Add this

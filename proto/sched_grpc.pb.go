@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	SchedService_SubmitIntent_FullMethodName = "/sched.SchedService/SubmitIntent"
 	SchedService_GetTask_FullMethodName      = "/sched.SchedService/GetTask"
+	SchedService_GetTaskLogs_FullMethodName  = "/sched.SchedService/GetTaskLogs"
 	SchedService_ApproveTask_FullMethodName  = "/sched.SchedService/ApproveTask"
 	SchedService_RollbackTask_FullMethodName = "/sched.SchedService/RollbackTask"
 	SchedService_JoinCluster_FullMethodName  = "/sched.SchedService/JoinCluster"
@@ -32,6 +33,7 @@ const (
 type SchedServiceClient interface {
 	SubmitIntent(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
 	GetTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskResponse, error)
+	GetTaskLogs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (*LogResponse, error)
 	ApproveTask(ctx context.Context, in *ApproveRequest, opts ...grpc.CallOption) (*ApproveResponse, error)
 	RollbackTask(ctx context.Context, in *RollbackRequest, opts ...grpc.CallOption) (*RollbackResponse, error)
 	JoinCluster(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error)
@@ -59,6 +61,16 @@ func (c *schedServiceClient) GetTask(ctx context.Context, in *TaskRequest, opts 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TaskResponse)
 	err := c.cc.Invoke(ctx, SchedService_GetTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *schedServiceClient) GetTaskLogs(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (*LogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LogResponse)
+	err := c.cc.Invoke(ctx, SchedService_GetTaskLogs_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +113,7 @@ func (c *schedServiceClient) JoinCluster(ctx context.Context, in *JoinRequest, o
 type SchedServiceServer interface {
 	SubmitIntent(context.Context, *SubmitRequest) (*SubmitResponse, error)
 	GetTask(context.Context, *TaskRequest) (*TaskResponse, error)
+	GetTaskLogs(context.Context, *LogRequest) (*LogResponse, error)
 	ApproveTask(context.Context, *ApproveRequest) (*ApproveResponse, error)
 	RollbackTask(context.Context, *RollbackRequest) (*RollbackResponse, error)
 	JoinCluster(context.Context, *JoinRequest) (*JoinResponse, error)
@@ -119,6 +132,9 @@ func (UnimplementedSchedServiceServer) SubmitIntent(context.Context, *SubmitRequ
 }
 func (UnimplementedSchedServiceServer) GetTask(context.Context, *TaskRequest) (*TaskResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTask not implemented")
+}
+func (UnimplementedSchedServiceServer) GetTaskLogs(context.Context, *LogRequest) (*LogResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetTaskLogs not implemented")
 }
 func (UnimplementedSchedServiceServer) ApproveTask(context.Context, *ApproveRequest) (*ApproveResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ApproveTask not implemented")
@@ -182,6 +198,24 @@ func _SchedService_GetTask_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SchedServiceServer).GetTask(ctx, req.(*TaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SchedService_GetTaskLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SchedServiceServer).GetTaskLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SchedService_GetTaskLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SchedServiceServer).GetTaskLogs(ctx, req.(*LogRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -254,6 +288,10 @@ var SchedService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTask",
 			Handler:    _SchedService_GetTask_Handler,
+		},
+		{
+			MethodName: "GetTaskLogs",
+			Handler:    _SchedService_GetTaskLogs_Handler,
 		},
 		{
 			MethodName: "ApproveTask",
